@@ -165,7 +165,7 @@ write (USB mode): 02 AA 0A <seq_hi> <seq_lo> <cmd> <len> <payload...> <crc8> EE
 
 | cmd | direction | payload | meaning |
 |---|---|---|---|
-| `0x15` (21) | read: 1B band index → reply 8B<br>write: 8B | `[index, Q_hi, Q_lo, gain_hi, gain_lo, freq_hi, freq_lo, type]` | per-band PEQ get/set. 5 bands queried on connect (`i in 0..4`) |
+| `0x15` (21) | read: 1B band index → reply 8B<br>write: 8B | `[index, gain_hi, gain_lo, freq_hi, freq_lo, Q_hi, Q_lo, type]` | per-band PEQ get/set. 5 bands queried on connect (`i in 0..4`) |
 | `0x16` (22) | read: 0B → reply 1B<br>write: 1B | `[value]` | PEQ enable / active-preset-index (0-3 = a preset slot, 4 = "off", inferred from `sa.a.f()`) |
 | `0x17` (23) | read: 0B → reply 2B<br>write: 2B | 16-bit signed, ×10 | global/makeup gain, in 0.1 dB steps |
 
@@ -173,9 +173,15 @@ Per-band payload encoding (`qa.b.h(zg.a band)` on write; mirrored in `qa.b.b(Str
 on read-reply parsing):
 
 - `index` — 1 byte, band number (0-based).
-- `Q` — 16-bit **signed** big-endian, fixed-point ×100 (e.g. `0.7` → `70` → `0x0046`).
 - `gain` — 16-bit signed big-endian, fixed-point ×10 (dB, e.g. `-3.5` → `-35`).
 - `freq` — 16-bit **unsigned** big-endian, plain Hz (no scaling).
+- `Q` — 16-bit **signed** big-endian, fixed-point ×100 (e.g. `0.7` → `70` → `0x0046`).
+
+  (**Corrected** — an earlier pass of this doc had `Q` before `gain`/`freq` in both the table
+  and this list. Re-deriving the byte offsets from `qa/b.h()`'s `System.arraycopy` calls, and
+  independently cross-checking against the `fiiocontrol-oss` WebHID driver's working
+  `parseInputReport()`/write path (§4d), both agree: the wire order is `index, gain, freq, Q,
+  type` — gain first, not Q first. Fixed here; if you cached the old order anywhere, discard it.)
 - `type` — 1 byte, filter type enum. FIIO's shared PEQ picker (`R$string`, package
   `com.fiio.fiioeq`) defines **7** named filter types in this fixed order: `Peak`,
   `LowShelf`, `HighShelf`, `BandPass`, `LowPass`, `HighPass`, `AllPass` (indices
