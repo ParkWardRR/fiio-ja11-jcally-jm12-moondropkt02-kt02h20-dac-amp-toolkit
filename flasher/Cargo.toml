@@ -26,3 +26,66 @@ path = "src/main.rs"
 strip = true
 opt-level = "z"
 lto = true
+
+# ---------------------------------------------------------------------------
+# .deb packaging (cargo-deb). Debian 12/13, Ubuntu.
+#
+# No `depends` on libusb: the release binary is static. `assets` installs the udev rules to
+# /usr/lib/udev/rules.d — the step users forget, whose failure mode (LIBUSB_ERROR_ACCESS) looks
+# like a broken tool rather than a permissions problem.
+#
+# STATUS: UNVERIFIED — cargo-deb has never been run against this manifest.
+# ---------------------------------------------------------------------------
+[package.metadata.deb]
+maintainer = "ParkWardRR <noreply@github.com>"
+copyright = "Blue Oak Model License 1.0.0"
+license-file = ["../LICENSE.md", "0"]
+extended-description = """
+Identify and cross-flash the USB-C DAC/amp dongles built on the KTMicro KT02H20
+(FiiO JA11, JCALLY JM12, and clones).
+
+WARNING: flashing can brick your dongle, and ktflash cannot read firmware off a
+KT02H20 first — there is no backup path. Keep a known-good image before you start.
+"""
+section = "utils"
+priority = "optional"
+depends = ""
+assets = [
+    ["target/release/ktflash", "usr/bin/", "755"],
+    ["../packaging/99-ktflash.rules", "usr/lib/udev/rules.d/99-ktflash.rules", "644"],
+    ["../README.md", "usr/share/doc/ktflash/README.md", "644"],
+    ["../docs/FLASHING.md", "usr/share/doc/ktflash/FLASHING.md", "644"],
+    ["../docs/LINUX.md", "usr/share/doc/ktflash/LINUX.md", "644"],
+]
+# UNVERIFIED: cargo-deb's maintainer-script hooks vary by version. Confirm this key is
+# `maintainer-scripts` (a directory) in the installed version before relying on it.
+maintainer-scripts = "../packaging/deb/"
+
+# ---------------------------------------------------------------------------
+# .rpm packaging (cargo-generate-rpm). AlmaLinux 9/10, RHEL, Rocky, Fedora.
+#
+# STATUS: UNVERIFIED — cargo-generate-rpm has never been run against this manifest.
+# ---------------------------------------------------------------------------
+[package.metadata.generate-rpm]
+license = "BlueOak-1.0.0"
+summary = "Probe and cross-flash KTMicro KT02H20 USB-C DAC dongles (FiiO JA11 family)"
+assets = [
+    { source = "target/release/ktflash", dest = "/usr/bin/ktflash", mode = "755" },
+    { source = "../packaging/99-ktflash.rules", dest = "/usr/lib/udev/rules.d/99-ktflash.rules", mode = "644" },
+    { source = "../README.md", dest = "/usr/share/doc/ktflash/README.md", mode = "644", doc = true },
+    { source = "../docs/FLASHING.md", dest = "/usr/share/doc/ktflash/FLASHING.md", mode = "644", doc = true },
+    { source = "../docs/LINUX.md", dest = "/usr/share/doc/ktflash/LINUX.md", mode = "644", doc = true },
+]
+# Static binary: nothing to require. Explicitly empty so rpmbuild's auto-requires (which would
+# pick up glibc from a non-musl build) cannot silently add a dependency the artifact does not need.
+requires = {}
+
+[package.metadata.generate-rpm.post_install_script]
+# Reload rules so the dongle works without a reboot; harmless if udev is absent.
+program = "/bin/sh"
+script = """
+if command -v udevadm >/dev/null 2>&1; then
+  udevadm control --reload-rules >/dev/null 2>&1 || :
+  udevadm trigger >/dev/null 2>&1 || :
+fi
+"""

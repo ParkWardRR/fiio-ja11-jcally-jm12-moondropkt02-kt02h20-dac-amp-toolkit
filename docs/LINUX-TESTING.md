@@ -139,9 +139,10 @@ fixable in the request. A physical unplug/replug always worked and preserved the
 Phases are ordered by risk. **Do not start P3 without a known-good firmware image in hand** —
 there is no readback ([`CDC-PROTOCOL.md`](CDC-PROTOCOL.md)).
 
-> Draft scripts for the phases below are in [`staging/linux-testing/`](../staging/linux-testing/)
-> — `collect-host-facts.sh`, `p0-smoke.sh`, `p2-usb-checks.sh`, and a results template. They
-> parse cleanly but have never been run on a Linux guest.
+> Scripts for the phases below are in [`scripts/testing/`](../scripts/testing/) —
+> `collect-host-facts.sh`, `p0-smoke.sh`, `p2-usb-checks.sh` — with a results template at
+> [`docs/results-template.md`](results-template.md). They parse cleanly but have never been run
+> on a Linux guest.
 
 ### P0 — hardware-free (every guest, no dongle)
 

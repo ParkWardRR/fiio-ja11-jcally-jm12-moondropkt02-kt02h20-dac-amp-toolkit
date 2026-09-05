@@ -1,7 +1,7 @@
 # Linux test results — ktflash v____ — filled in ____-__-__
 
 Copy this per test round. Paste `collect-host-facts.sh` output under each guest.
-Phases and pass criteria: [`docs/LINUX-TESTING.md`](../../docs/LINUX-TESTING.md) §3.
+Phases and pass criteria: [`docs/LINUX-TESTING.md`](LINUX-TESTING.md) §3.
 
 **Legend:** ✅ pass · ❌ fail · ⏳ not run · n/a not applicable
 

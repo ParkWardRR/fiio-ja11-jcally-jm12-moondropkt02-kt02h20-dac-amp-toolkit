@@ -313,8 +313,12 @@ multi-arch manifest to maintain.
 
 ## 10. File inventory
 
-> Draft, untested implementations of most of the below live in [`staging/`](../staging/) —
-> see [`staging/APPLY.md`](../staging/APPLY.md) for the ordered integration steps.
+> `rust-toolchain.toml`, `scripts/release.sh`, `scripts/install.sh`, and the
+> `[package.metadata.deb]` / `[package.metadata.generate-rpm]` blocks in `flasher/Cargo.toml`
+> have landed but are untested — none has been run for real (no minisign key, no cargo-deb /
+> cargo-generate-rpm / cargo-zigbuild run). See [`staging/APPLY.md`](../staging/APPLY.md) for
+> what is still open (the docs pass below, and the minisign key generation, which is a
+> supply-chain decision made separately).
 
 ```
 rust-toolchain.toml                 new   pinned channel + release targets

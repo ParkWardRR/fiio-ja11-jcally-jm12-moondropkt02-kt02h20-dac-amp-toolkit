@@ -15,37 +15,32 @@
 | `flasher-src/` | `flasher/src/` | integrated; keeping a copy meant two sources of truth for firmware-erasing code |
 | `macos-native/` | [`macos/native/`](../macos/native/) | the `ktmac` Swift package and C probes are real work now, not a proposal |
 | `tools/vmatrix/` | [`tools/vmatrix/`](../tools/vmatrix/) | standalone Go tool; needs no integration, only testing |
+| `release/rust-toolchain.toml` | [`/rust-toolchain.toml`](../rust-toolchain.toml) (repo root) | pinned channel + release targets |
+| `release/release.sh` | [`scripts/release.sh`](../scripts/release.sh) | build matrix → tarballs → SHA256SUMS → minisign |
+| `release/install.sh` | [`scripts/install.sh`](../scripts/install.sh) | curl\|sh installer, verifies before installing |
+| `release/cargo-toml-additions.toml` | merged into [`flasher/Cargo.toml`](../flasher/Cargo.toml) | `[package.metadata.deb]` / `[package.metadata.generate-rpm]`; the `vendored` feature and `libc` dep had already landed |
+| `packaging/99-ktflash.rules` | [`packaging/99-ktflash.rules`](../packaging/99-ktflash.rules) | was already identical to the shipped file — the ModemManager fix had already been merged separately |
+| `packaging/deb/postinst` | [`packaging/deb/postinst`](../packaging/deb/postinst) | needed by the `maintainer-scripts` key just added to `flasher/Cargo.toml` |
+| `linux-testing/*.sh` | [`scripts/testing/`](../scripts/testing/) | `collect-host-facts.sh`, `p0-smoke.sh`, `p2-usb-checks.sh` |
+| `linux-testing/results-template.md` | [`docs/results-template.md`](../docs/results-template.md) | |
 
 ## What is left
 
-```
-staging/
-├── HANDOFF.md                   ← current state of everything
-├── APPLY.md                     remaining integration steps (7-9)
-├── release/
-│   ├── rust-toolchain.toml        pinned channel + release targets
-│   ├── release.sh                 build matrix → tarballs → SHA256SUMS → minisign
-│   ├── install.sh                 curl|sh installer, verifies before installing
-│   └── cargo-toml-additions.toml  deb/rpm metadata to merge into flasher/Cargo.toml
-├── packaging/
-│   ├── 99-ktflash.rules           + ModemManager ignore rules (RELEASE-PLAN §5.3)
-│   └── deb/postinst
-└── linux-testing/
-    ├── collect-host-facts.sh
-    ├── p0-smoke.sh
-    ├── p2-usb-checks.sh
-    └── results-template.md
-```
+Everything under `release/`, `packaging/`, and `linux-testing/` has landed. What remains is only:
 
-## Verification status of what remains
+- **Step 5** (`APPLY.md`) — the `bootdiag` judgement call, still open.
+- **Step 9** (`APPLY.md`) — the docs pass (README quickstart, FLASHING.md, LINUX.md, etc.) once
+  everything above is confirmed working.
+- The minisign key itself: `install.sh` still has the `RWQPLACEHOLDER…` constant, and no key has
+  been generated. That is a deliberate supply-chain decision (where the private key lives,
+  custody) made separately with explicit sign-off, not a mechanical promotion step.
+- Actually running any of this for real: `release.sh --dry-run`, `cargo-deb`,
+  `cargo-generate-rpm`, `cargo-zigbuild` have still never been executed — only `bash -n` /
+  `cargo metadata` sanity checks have been done.
 
-| | |
-|---|---|
-| ✅ **Shell parses** | `bash -n` / `sh -n` clean. |
-| ❌ **Never executed** | `release.sh`, `install.sh` and the test scripts were not run. |
-| ❌ **Not shellcheck-verified** | `shellcheck` is not installed on the authoring machine. |
-| ❌ **Packaging metadata unbuilt** | `cargo-deb` / `cargo-generate-rpm` were never run. |
-| ❌ **No cross-compile attempted** | `zig` / `cargo-zigbuild` are not installed here. RELEASE-PLAN §3.2 flags this as the one unproven link. |
+**Not planned:** AlmaLinux/RHEL hardware validation via remote VM/USB-IP was explicitly dropped
+as a project goal. Alma/RHEL remain supported **packaging** targets (the `.rpm` metadata above
+targets them); only the "validate over VM passthrough" testing approach was dropped.
 
 ## The two udev changes worth reviewing
 
@@ -68,5 +63,6 @@ staging/
   executable, and refuses rather than warning.
 - Honest labels: nothing claims to work, because nothing has been run.
 
-Delete this directory once `release/`, `packaging/` and `linux-testing/` have landed in
-`scripts/`, `packaging/` and `scripts/testing/`.
+`release/`, `packaging/` and `linux-testing/` have landed in `scripts/`, `packaging/` and
+`scripts/testing/` (plus `docs/results-template.md`). Delete this directory once Step 5 and
+Step 9 (`APPLY.md`) are done — it is a scratchpad, not a second source of truth.
