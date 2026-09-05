@@ -2,7 +2,7 @@
 
 **Status:** ✅ **P0–P3 passed on Debian 13** (2026‑09‑05, real hardware, full narrative in
 [ROADMAP Appendix D](../ROADMAP.md#20260905--linuxnative-validation-session-narrative-veloce-hyperv-lab)) ·
-AlmaLinux 10.2 blocked at the test‑rig level (§2.3) · **Companion to:** [`RELEASE-PLAN.md`](RELEASE-PLAN.md)
+AlmaLinux/RHEL validation **not pursued** — structurally blocked at the test‑rig level, not a project goal (§2.3) · **Companion to:** [`RELEASE-PLAN.md`](RELEASE-PLAN.md)
 **Gates:** ROADMAP Phase 4.1 ("Test `flash-cdc` on real Debian/Arch, no OrbStack") and the
 `native write` column of the README support table.
 
