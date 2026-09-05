@@ -135,8 +135,8 @@ Drop the OrbStack detour on Linux — **done for the write path**; binaries/nota
    `.rpm` via `cargo-generate-rpm`, `SHA256SUMS` + a real minisign signature — all cross-verified.
    Found and fixed two real bugs along the way (a glibc/musl `libc::ioctl` type mismatch, and
    `cargo-generate-rpm`'s actual schema differing from the drafted manifest) — see
-   [`docs/RELEASE-PLAN.md`](docs/RELEASE-PLAN.md) §11 for detail. **Not yet published** —
-   `gh release create` is a separate, visible decision.
+   [`docs/RELEASE-PLAN.md`](docs/RELEASE-PLAN.md) §11 for detail. **Published as
+   [v1.2.0](https://github.com/ParkWardRR/fiio-ja11-jcally-jm12-moondropkt02-kt02h20-dac-amp-toolkit/releases/tag/v1.2.0), 2026‑09‑05.**
 3. ⏳ **macOS notarization** (Apple Developer signing) — prerequisite for a Homebrew tap.
 4. ✅ **Reproducibility**: `Cargo.lock` committed; toolchain/target recorded.
 

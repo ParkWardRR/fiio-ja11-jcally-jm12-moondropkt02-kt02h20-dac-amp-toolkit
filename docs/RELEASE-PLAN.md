@@ -1,13 +1,15 @@
 # Release plan — prebuilt executables + Linux release
 
-**Status:** ✅ **M1–M2 built and verified locally, 2026‑09‑05** (macOS universal binary +
-ad-hoc sign, both Linux musl targets via `cargo-zigbuild --features vendored`, `.deb` via
-`cargo-deb`, `.rpm` via `cargo-generate-rpm`, checksums + minisign signature, all cross-verified)
-— **not yet published** (`gh release create` needs an explicit go/no-go, see §11). Found and
-fixed two real bugs that only surfaced by actually running the tools: a `libc::ioctl` request-type
-mismatch between glibc and musl (`serialtransport.rs`), and `cargo-generate-rpm` v0.21.0's actual
-schema for `post_install_script` (a string, not a table) plus its default `ldd`-based
-auto-requires needing explicit disabling on a host with no `ldd`. **Feeds:** ROADMAP Phase 4
+**Status:** ✅ **M1–M5 done — [v1.2.0 published](https://github.com/ParkWardRR/fiio-ja11-jcally-jm12-moondropkt02-kt02h20-dac-amp-toolkit/releases/tag/v1.2.0), 2026‑09‑05**
+(macOS universal binary + ad-hoc sign, both Linux musl targets via `cargo-zigbuild --features
+vendored`, `.deb` via `cargo-deb`, `.rpm` via `cargo-generate-rpm`, checksums + minisign
+signature, all cross-verified, all uploaded to a real GitHub release). Found and fixed two real
+bugs that only surfaced by actually running the tools: a `libc::ioctl` request-type mismatch
+between glibc and musl (`serialtransport.rs`), and `cargo-generate-rpm` v0.21.0's actual schema
+for `post_install_script` (a string, not a table) plus its default `ldd`-based auto-requires
+needing explicit disabling on a host with no `ldd`. Remaining: M6 (live `.deb`/`.rpm` install
+test — no Debian/Alma host was available at build time), M7 (notarization — needs an Apple
+Developer account). **Feeds:** ROADMAP Phase 4
 **Supersedes in detail:** [`RELEASING.md`](RELEASING.md) (which stays as the short pre-release checklist)
 **Companions:** [`LINUX-TESTING.md`](LINUX-TESTING.md) (validation) · [`MACOS-NATIVE.md`](MACOS-NATIVE.md) (dropping OrbStack)
 
