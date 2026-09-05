@@ -27,13 +27,16 @@
 > own risk**. `ktflash flash-cdc` refuses to write without `--yes` for exactly this reason.
 
 > [!NOTE]
-> **macOS‑first, no Windows required — and Linux‑native works too.** `ktflash` identifies dongles
-> natively on macOS and, via **OrbStack**, reaches the USB endpoints macOS itself blocks — to
-> handshake, unlock, diagnose, **and flash**. The end‑to‑end native *write* is ✅ **proven on
-> hardware** two independent ways (2026‑09‑05): `ktflash flash-cdc` reflashed the stock
-> `JA11_V2.2.bin` over the CDC bootloader from a **Mac + OrbStack** (no Mac mini, no Windows, no
-> vendor tool), and separately, fully **Linux‑native** — over the serial transport on a Debian 13
-> VM, no OrbStack, no libusb claim, dongle reached over the network via `usbipd-win`.
+> **No Windows, no VM, no container required — on macOS *or* Linux.** The end‑to‑end native
+> *write* is ✅ **proven on hardware** three independent ways (2026‑09‑05): from a **Mac +
+> OrbStack** (`ktflash flash-cdc`, libusb, no Mac mini/Windows/vendor tool); fully
+> **Linux‑native** (same command, serial transport, a Debian 13 VM, no OrbStack); and fully
+> **macOS‑native** — `ktmac unlock` (a small Swift companion, `IOHIDManager`) plus `ktflash
+> flash-cdc --transport serial` reflashed the stock `JA11_V2.2.bin` with **zero OrbStack
+> involvement**. That last one overturned this project's own earlier assumption that macOS
+> couldn't drive the unlock at all — see [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md).
+> `ktmac` isn't merged into `ktflash` yet, so OrbStack remains the simplest single‑binary path
+> for now.
 
 ---
 
@@ -80,18 +83,23 @@ Full flow + the honest per‑step status → [docs/FLASHING.md](docs/FLASHING.md
 
 ## 🚦 Where it runs
 
-| Host | Identify | Unlock / diag | Native write |
+| Host | Identify | Unlock | Native write |
 | --- | --- | --- | --- |
-| **macOS (native)** | ✅ | ❌ kernel owns the interface | ❌ |
+| **macOS (native, `ktflash` only)** | ✅ | ❌ `rusb` can't claim the interface | ❌ |
+| **macOS (native, + `ktmac`)** | ✅ | ✅ **proven** (`ktmac unlock`, `IOHIDManager`) | ✅ **proven** (`flash-cdc --transport serial`) |
 | **macOS + OrbStack** | ✅ | ✅ | ✅ **proven** (`flash-cdc`, libusb) |
 | **Linux (native)** | ✅ | ✅ | ✅ **proven** (`flash-cdc`, serial transport — Debian 13) |
 
-macOS can't claim the dongle's USB interface (`IOHIDFamily` owns it) — OrbStack passes the device
-to a Linux guest where libusb works, and the whole thing still runs from your Mac's Terminal.
-**Linux needs no such detour**: install the [udev rules](packaging/99-ktflash.rules) and
-`ktflash` drives the bootloader over its CDC‑ACM tty directly. Prebuilt Linux binaries are ⏳
+`ktflash` itself still can't claim the interface for `unlock` on macOS (`IOHIDFamily` owns it) —
+that part of the old assumption was correct. What changed: a **separate, tiny path**
+(`IOHIDManager` instead of libusb, in the `ktmac` companion tool) reaches the device anyway, no
+interface claim needed, and the bootloader it triggers is a plain serial device `ktflash` already
+drives natively. OrbStack remains the simplest **single‑binary** path until `ktmac` is merged in
+— see [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) for the full story and open item.
+**Linux needs no detour at all**: install the [udev rules](packaging/99-ktflash.rules) and
+`ktflash` drives everything over the CDC‑ACM tty directly. Prebuilt binaries (both OSes) are ⏳
 next — for now, `cargo build --release` from source. Full validation notes (including a real
-RHEL/AlmaLinux limitation with USB/IP test rigs) → [ROADMAP Phase 4](ROADMAP.md#phase-4--linuxnative-release--write-proven-2026-09-05--binaries-).
+RHEL/AlmaLinux limitation with USB/IP test rigs) → [ROADMAP Phase 4](ROADMAP.md).
 
 ---
 
@@ -141,14 +149,17 @@ Full table + how to vet a candidate → [docs/COMPATIBILITY.md](docs/COMPATIBILI
 
 ## 🧭 Status & help wanted
 
-- ✅ **Protocol fully reversed + native write PROVEN on hardware, two ways** — `ktflash flash-cdc`
-  did a complete reflash of the stock `JA11_V2.2.bin` from a Mac + OrbStack (`v1.1.0`) and,
-  separately, fully Linux‑native over the serial transport on a Debian 13 VM (2026‑09‑05, no
-  OrbStack — see [ROADMAP Phase 4](ROADMAP.md#phase-4--linuxnative-release--write-proven-2026-09-05--binaries-)).
+- ✅ **Protocol fully reversed + native write PROVEN on hardware, three ways** — `ktflash
+  flash-cdc` did a complete reflash of the stock `JA11_V2.2.bin` from a Mac + OrbStack (`v1.1.0`),
+  fully Linux‑native over the serial transport on a Debian 13 VM, and fully **macOS‑native** (no
+  OrbStack at all, via the `ktmac` companion for `unlock`) — all 2026‑09‑05. The macOS‑native
+  result overturned this project's own earlier "macOS can't drive the unlock" assumption; see
+  [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) and [ROADMAP Phase 4](ROADMAP.md).
 - ❌ **Firmware backup is not possible in software** on the KT02H20 (no read command; the
   normal‑mode reader is inert on this silicon) — keep your original image. [Why.](docs/CDC-PROTOCOL.md)
-- 🚧 **Next:** prebuilt binaries (Linux + macOS); more KT02H20 dongles; AlmaLinux/RHEL hardware
-  validation on a native (non‑USB/IP) machine.
+- 🚧 **Next:** merge `ktmac`'s native unlock into `ktflash` itself (currently two binaries);
+  prebuilt binaries (Linux + macOS); more KT02H20 dongles; AlmaLinux/RHEL hardware validation on
+  a native (non‑USB/IP) machine.
 - 🟡 **Wanted:** before/after descriptors from any dongle you flash; **PCB photos / JTAG‑SWD pad
   locations** (the only path to a real backup); a JCALLY JM12 + its stock image.
 

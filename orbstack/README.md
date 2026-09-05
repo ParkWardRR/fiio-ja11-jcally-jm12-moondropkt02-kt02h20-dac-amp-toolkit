@@ -1,9 +1,17 @@
-# OrbStack utility — drive the dongle from macOS
+# OrbStack utility — drive the dongle from macOS (fallback path)
 
-macOS can't reach these dongles' HID interrupt endpoints (the kernel owns the interface).
-[OrbStack](https://orbstack.dev) fixes that: `orb usb attach` hands the physical device to a
-Linux guest, where libusb can detach the kernel driver and talk to the endpoints — all from
-your macOS Terminal, no full VM.
+**Status (2026‑09‑05): demoted to fallback, not required.** Native macOS now works end‑to‑end
+without OrbStack — `ktmac unlock` (a small Swift companion, `IOHIDManager`) plus `ktflash
+flash-cdc --transport serial` reflashed a dongle with zero OrbStack involvement, on real
+hardware. See [`../docs/MACOS-NATIVE.md`](../docs/MACOS-NATIVE.md). This script stays as the
+known‑good, longer‑established route — useful if `ktmac` isn't built yet, or you'd rather not
+grant the Input Monitoring consent the native `unlock` needs.
+
+`rusb`/libusb on macOS genuinely can't claim these dongles' HID interrupt endpoints (the kernel
+owns the interface) — that part of the original reasoning was correct, and it's still why
+`ktflash unlock` itself (not `ktmac`) needs a way around it. [OrbStack](https://orbstack.dev)
+fixes it by handing the physical device to a Linux guest, where libusb can detach the kernel
+driver and talk to the endpoints — all from your macOS Terminal, no full VM.
 
 ## `ktflash-orbstack.sh`
 
@@ -22,9 +30,10 @@ Set `KT_MACHINE` to use a different guest name (default `ktflash`).
 
 ## Honest scope
 
-This gets you **all the way to the bootloader** and characterises the device — which is the
-hard, macOS‑blocked part. The end‑to‑end firmware **write** isn't reversed yet (the CDC
-download protocol; see [`../docs/EXTRACTION.md`](../docs/EXTRACTION.md) §5). PRs welcome.
+This gets you all the way to the bootloader and characterises the device. The end‑to‑end
+firmware **write** is fully reversed and proven on hardware — via this OrbStack path (`v1.1.0`),
+via Linux‑native, and via the macOS‑native `ktmac`+`ktflash` combination above — see
+[`../ROADMAP.md`](../ROADMAP.md) Phases 3–4 for the current state.
 
 ## Gotchas
 

@@ -1,6 +1,12 @@
 # Plan — native macOS, without OrbStack
 
-**Status:** plan / investigation · **Companion to:** [`RELEASE-PLAN.md`](RELEASE-PLAN.md) (M8)
+**Status:** ✅ **proven end-to-end on real hardware, 2026‑09‑05** — every milestone through N4
+passed (see §5); N5 was never needed. `ktmac unlock --send` (Swift, `IOHIDManager`) plus
+`ktflash flash-cdc --transport serial` (Rust, over the CDC‑ACM tty) did a complete flash on a
+Mac with **zero OrbStack involvement** — device re‑enumerated as a working JA11 with an
+unchanged descriptor SHA‑256. **Open item:** the native unlock lives in the separate `ktmac`
+companion tool, not yet ported into `ktflash` itself — see §8 (new).
+**Companion to:** [`RELEASE-PLAN.md`](RELEASE-PLAN.md) (M8)
 **Goal:** `ktflash unlock` and `ktflash flash-cdc` run on stock macOS with no OrbStack, no
 container, no VM, no kext, and — critically — **no Apple entitlement that would require a paid
 Developer account**, so it still ships as the unsigned/ad-hoc build from `RELEASE-PLAN.md` §4.
@@ -160,7 +166,7 @@ fool ourselves about. All are recoverable — a power-cycle returns the device t
 
 | # | Approach | Cost | Notes |
 |---|---|---|---|
-| **E1** | `IOHIDDeviceSetReport(dev, kIOHIDReportTypeOutput, 0x54, buf, 10)` via `IOHIDManager`, matching the `0xFF01` collection | ~1h | Settles §4.0. Apple's USB HID driver has historically preferred the interrupt-OUT pipe for output reports *when the interface declares one* — and this device does (`0x03` OUT). Worth testing before believing the pessimistic doc |
+| **E1** | `IOHIDDeviceSetReport(dev, kIOHIDReportTypeOutput, 0x54, buf, 10)` via `IOHIDManager`, matching the `0xFF01` collection | ~1h | ✅ **PASS, 2026‑09‑05.** Settled §4.0 in favor of `dongle-investigation.md` — `PROTOCOL.md` was wrong (now corrected). `IOHIDDeviceSetReport` returns success and the device genuinely re‑enumerates as `8888:cdc0`. `ktmac unlock --send` is the reference implementation. |
 | **E2** | E1 + `IOHIDDeviceOpen(dev, kIOHIDOptionsTypeSeizeDevice)` | +1h | Documented IOKit way to take exclusive ownership from other clients. May need root |
 | **E3** | `IOUSBInterfaceInterface` + **`USBInterfaceOpenSeize()`** → `WritePipe` on `0x03` | ~half day | The classic macOS route to seize an interface from a kernel driver, **no kext and no DriverKit entitlement**. Likely needs root. Whether macOS still permits seizing from IOHIDFamily on current releases is the open question |
 | **E4** | `IOUSBHostInterface` (IOUSBHost.framework) | ~half day | More modern API; may require entitlements — check before investing |
@@ -184,15 +190,15 @@ Be honest about the outcome rather than forcing it:
 
 ## 5. Milestones
 
-| # | Milestone | Needs hardware? |
-|---|---|---|
-| **N0** | Confirm `8888:cdc0` publishes `/dev/cu.usbmodem*` on macOS (unlock via OrbStack once, then look) | ✅ yes — 10 minutes |
-| **N1** | Refactor `cmd_flash_cdc` + `cmd_bootdiag` onto `proto::cdc::Transport` | ❌ no — unit-testable |
-| **N2** | `SerialTransport` (`--transport serial --port …`), frame accumulation, `libc` termios | ❌ to write, ✅ to prove |
-| **N3** | Prove `bootdiag` then `flash-cdc` over the tty on macOS | ✅ yes |
-| **N4** | E1/E2 — native HID `unlock` via `IOHIDManager`; settles §4.0 either way | ✅ yes |
-| **N5** | E3 — `USBInterfaceOpenSeize` fallback, only if N4 fails | ✅ yes |
-| **N6** | Auto transport selection; docs rewritten; `orbstack/` demoted to a fallback appendix | — |
+| # | Milestone | Needs hardware? | Status |
+|---|---|---|---|
+| **N0** | Confirm `8888:cdc0` publishes `/dev/cu.usbmodem*` on macOS (unlock via OrbStack once, then look) | ✅ yes — 10 minutes | ✅ done |
+| **N1** | Refactor `cmd_flash_cdc` + `cmd_bootdiag` onto `proto::cdc::Transport` | ❌ no — unit-testable | ✅ done |
+| **N2** | `SerialTransport` (`--transport serial --port …`), frame accumulation, `libc` termios | ❌ to write, ✅ to prove | ✅ done |
+| **N3** | Prove `bootdiag` then `flash-cdc` over the tty on macOS | ✅ yes | ✅ **done, 2026‑09‑05** — full write, 67/67 packets |
+| **N4** | E1/E2 — native HID `unlock` via `IOHIDManager`; settles §4.0 either way | ✅ yes | ✅ **done, 2026‑09‑05** — E1 alone was sufficient |
+| **N5** | E3 — `USBInterfaceOpenSeize` fallback, only if N4 fails | ✅ yes | ➖ not needed (N4 passed) |
+| **N6** | Auto transport selection; docs rewritten; `orbstack/` demoted to a fallback appendix | — | 🚧 docs rewritten this pass; `ktmac`→`ktflash` merge still open (§8) |
 
 **N1 and N2 need no dongle** — they are ordinary refactoring against an existing trait with
 existing fixtures, and they are on the critical path. Start there.
@@ -225,3 +231,31 @@ appear, the whole Stage B design needs rethinking, and we'd rather know in ten m
 need OrbStack"), `PROTOCOL.md` §macOS caveat (rewrite per the E1 result),
 `usbtransport.rs` module docs, `ROADMAP.md`, and `orbstack/README.md` (demoted, not deleted — it
 stays as the known-good fallback).
+
+**Done, 2026‑09‑05** — all of the above updated to reflect the proven result.
+
+---
+
+## 8. Open item — `ktmac`'s unlock is not yet in `ktflash`
+
+The proven pipeline today is **two binaries**: `ktmac unlock --send` (Swift) triggers the
+bootloader, then `ktflash flash-cdc --transport serial` (Rust) does the actual write. That's a
+real, complete, OrbStack‑free flow — but it's not what a user typing `ktflash unlock` on macOS
+gets today; that command still goes through `rusb` and fails exactly as `PROTOCOL.md` used to
+(correctly) describe for the *libusb* path.
+
+Two ways to close this, neither started:
+
+1. **FFI bindings from Rust to IOKit's `IOHIDManager`** — port `HIDUnlocker.swift`'s logic
+   directly into `ktflash` (e.g. via the `io-kit-sys` / `core-foundation` crates, or a thin
+   `objc`/C shim). Single binary, single install; the honest cost is IOKit FFI from Rust being
+   fiddlier than from Swift, which is precisely why this was prototyped in Swift first.
+2. **Ship `ktmac` alongside `ktflash`** as a small companion binary for the one macOS‑specific
+   step, and have `ktflash unlock` shell out to it when `--transport serial`/`auto` is selected
+   on macOS. Less elegant, much less work, and keeps the already‑working, already‑tested Swift
+   code as the source of truth instead of re‑deriving it in Rust.
+
+Whichever direction: the TCC consent prompt (§4.0b) becomes part of the macOS first‑run
+experience for `unlock` specifically, and needs a first‑run message pointing at
+Input Monitoring settings, not a bare `kIOReturnNotPermitted` hex code (both `ktmac` and the
+staging C probes already do this — carry it forward, don't regress to the raw error).

@@ -1,7 +1,7 @@
 # Linux testing plan — VM validation for the Linux release
 
 **Status:** ✅ **P0–P3 passed on Debian 13** (2026‑09‑05, real hardware, full narrative in
-[ROADMAP Appendix D](../ROADMAP.md#2026-09-05--linuxnative-validation-session-narrative-veloce-hyperv-lab)) ·
+[ROADMAP Appendix D](../ROADMAP.md#20260905--linuxnative-validation-session-narrative-veloce-hyperv-lab)) ·
 AlmaLinux 10.2 blocked at the test‑rig level (§2.3) · **Companion to:** [`RELEASE-PLAN.md`](RELEASE-PLAN.md)
 **Gates:** ROADMAP Phase 4.1 ("Test `flash-cdc` on real Debian/Arch, no OrbStack") and the
 `native write` column of the README support table.
@@ -97,7 +97,7 @@ warning stands for anything with more network in between (e.g. a genuinely remot
 
 ### 2.3 Confirmed recipe — Option B via `usbipd-win` (Hyper-V host, Windows 10/11)
 
-Full narrative in [ROADMAP Appendix D](../ROADMAP.md#2026-09-05--linuxnative-validation-session-narrative-veloce-hyperv-lab).
+Full narrative in [ROADMAP Appendix D](../ROADMAP.md#20260905--linuxnative-validation-session-narrative-veloce-hyperv-lab).
 Condensed steps, host side (PowerShell, admin):
 
 ```powershell
@@ -262,7 +262,7 @@ path; a `flash-cdc --execute` attempted right after `--send` failed safely (`KTM
 back, journal correctly said `CancelOrBegin`, nothing erased) because the one‑shot handshake was
 already spent — recovered with a physical power‑cycle, then a clean `unlock` → `flash-cdc
 --execute --yes` completed end‑to‑end on the first real attempt. Full narrative:
-[ROADMAP Appendix D](../ROADMAP.md#2026-09-05--linuxnative-validation-session-narrative-veloce-hyperv-lab).
+[ROADMAP Appendix D](../ROADMAP.md#20260905--linuxnative-validation-session-narrative-veloce-hyperv-lab).
 
 **One dongle, many guests:** P1–P3 only need to pass on a representative subset — one Debian and
 one Alma is enough to call the Linux path proven. P0 should pass everywhere. Plan the passthrough

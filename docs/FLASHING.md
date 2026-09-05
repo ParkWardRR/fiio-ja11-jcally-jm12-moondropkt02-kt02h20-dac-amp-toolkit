@@ -32,13 +32,23 @@ won't. There is intentionally **no Windows path here** — if you just want to f
 without any of this, FiiO ships their own official Windows updater. This toolkit is about
 doing it natively from a Mac (and, later, Linux).
 
-## Why macOS needs OrbStack
+## If you need OrbStack (and when you don't)
 
-macOS's `IOHIDFamily`/`AppleUSBAudio` drivers **own** the dongle's interface: libusb returns
-`LIBUSB_ERROR_ACCESS`, and `IOHIDDeviceSetReport` goes down the control pipe the firmware
-ignores. [OrbStack](https://orbstack.dev) hands the physical device to a lightweight Linux
-guest with `orb usb attach`, where libusb can detach the kernel driver and use the real
-interrupt/bulk endpoints — all from your macOS Terminal, no full VM.
+**Corrected 2026‑09‑05 — you may not need OrbStack at all.** The original reasoning here was
+that macOS's `IOHIDFamily`/`AppleUSBAudio` drivers own the dongle's interface — libusb returns
+`LIBUSB_ERROR_ACCESS`, and (this part turned out to be wrong) `IOHIDDeviceSetReport` supposedly
+went down a control pipe the firmware ignores. Confirmed on real hardware: `IOHIDDeviceSetReport`
+via `IOHIDManager` **does** reach the device natively, no interface claim needed — see
+[`docs/MACOS-NATIVE.md`](MACOS-NATIVE.md). The native path today is the `ktmac` companion tool
+(`staging/macos-native/ktmac`) for `unlock`, plus `ktflash flash-cdc --transport serial` for the
+write — no OrbStack, no VM, over the bootloader's CDC‑ACM tty.
+
+**You still need OrbStack if:** `ktmac` isn't built/available yet on your machine, you'd rather
+not grant Input Monitoring consent (native `unlock` requires it — macOS TCC, since 10.15), or
+you're troubleshooting and want the known‑good, longer‑established path. [OrbStack](https://orbstack.dev)
+hands the physical device to a lightweight Linux guest with `orb usb attach`, where libusb can
+detach the kernel driver and use the real interrupt/bulk endpoints — all from your macOS
+Terminal, no full VM. It remains a fully supported fallback, not a dead end.
 
 ## What works today
 

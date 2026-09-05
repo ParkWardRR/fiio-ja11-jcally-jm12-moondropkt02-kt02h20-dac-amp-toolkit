@@ -1,4 +1,4 @@
-//! Real USB transport for the CDC bootloader (roadmap M3 — Linux-native / OrbStack).
+//! Real USB (libusb) transport for the CDC bootloader — the OrbStack/Linux path.
 //!
 //! This is the concrete [`proto::cdc::Transport`] that carries protocol bytes over the
 //! bootloader's bulk endpoints (`0x03` OUT / `0x83` IN on the CDC-data interface). It lives
@@ -6,10 +6,17 @@
 //! its logic can be tested with no hardware. This module is the opposite: it is thin, all
 //! I/O, and can only be exercised with a real dongle in the bootloader state.
 //!
-//! ## Working-agent notes (this is the part only you can finish)
-//! - This compiles but is **untested** — I have no dongle. On Linux/OrbStack, after
-//!   `ktflash unlock`, the device re-enumerates as `8888:cdc0`; run against that.
-//! - macOS blocks claiming the interface (IOHIDFamily / kernel CDC driver); use OrbStack.
+//! [`crate::serialtransport::SerialTransport`] is the other implementation of the same trait,
+//! driving the bootloader's CDC‑ACM tty instead of claiming the USB interface directly — that
+//! one works natively on macOS too (confirmed on hardware, [`docs/MACOS-NATIVE.md`]); this one
+//! remains the OrbStack/Linux route. [`crate::boottransport`] picks between them.
+//!
+//! ## Working-agent notes
+//! - Hardware‑confirmed on Linux/OrbStack: after `ktflash unlock`, the device re-enumerates as
+//!   `8888:cdc0`; this transport drives it over the raw bulk endpoints.
+//! - On macOS, prefer [`crate::serialtransport::SerialTransport`] — this module still can't
+//!   claim the interface there (`IOHIDFamily`/kernel CDC driver owns it), which is a real,
+//!   unresolved limitation of the *libusb* route specifically, not of native macOS in general.
 //! - `recv` reads one bulk packet (up to 64 B, the usual CDC bulk max-packet). If the real
 //!   framing spans multiple packets you'll want to accumulate until a full frame is decodable
 //!   — the `FrameCodec` should tell you where a frame ends. Adjust once the wire codec exists.

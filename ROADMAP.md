@@ -18,12 +18,16 @@ Windows is only ever a reverse‑engineering source.
 
 > ## 📍 You are here
 >
-> **The native write is proven on hardware on *two* independent paths now** (2026‑09‑05):
-> **macOS + OrbStack** (`v1.1.0`, raw libusb) and, the same day, **Linux‑native over the serial
-> transport** (`v1.1.1`+, a Debian 13 VM with the dongle reached over `usbipd-win` from a Windows
-> host — no OrbStack, no libusb claim). Phases 0–4 are complete. The frontier now is **Phase 4.2
-> (prebuilt binaries)** and **Phase 6 (more dongles)**. **Phase 5 (software backup) is closed as
-> *not possible* on this silicon** — it needs hardware.
+> **The native write is proven on hardware on *three* independent paths now**, all 2026‑09‑05:
+> **macOS + OrbStack** (`v1.1.0`, raw libusb); **Linux‑native over the serial transport**
+> (`v1.1.1`+, a Debian 13 VM reached over `usbipd-win` from a Windows host, no OrbStack); and
+> **macOS‑native with zero OrbStack** — `ktmac unlock` (Swift, `IOHIDManager`) plus `ktflash
+> flash-cdc --transport serial`, on the same Mac used for this session. That last one **overturned
+> this project's own long-standing assumption** that macOS couldn't drive the unlock at all — see
+> [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) and Appendix D. Phases 0–4 are complete. The
+> frontier now is **merging `ktmac` into `ktflash`** (still two binaries today), **prebuilt
+> binaries**, and **Phase 6 (more dongles)**. **Phase 5 (software backup) is closed as *not
+> possible* on this silicon** — it needs hardware.
 
 ---
 
@@ -34,7 +38,7 @@ Phase 0  Reverse-engineer to the bootloader ........................... ✅ done
 Phase 1  Hardware-free protocol + safety core ........................ ✅ done
 Phase 2  Reverse the CDC download protocol  ⭐ .................... ✅ done (was the blocker)
 Phase 3  Native flash on hardware (writer)  ⭐ ................... ✅ done — PROVEN on hardware
-Phase 4  Linux-native release (binaries, notarization) .............. ✅ write proven · binaries ⏳
+Phase 4  Linux + macOS native release (binaries, notarization) ...... ✅ write proven, both OSes · binaries ⏳
 Phase 5  Firmware backup / readback ................................. ❌ not possible in software
 Phase 6  Fleet: JM12, compatibility matrix, dongle discovery ........ ⏳ needs evidence
 ```
@@ -100,7 +104,7 @@ why backup is impossible in software.
 
 ---
 
-## Phase 4 — Linux‑native release ✅ *write PROVEN 2026‑09‑05* · binaries ⏳
+## Phase 4 — Linux + macOS native release ✅ *write PROVEN on both, 2026‑09‑05* · binaries ⏳
 
 Drop the OrbStack detour on Linux — **done for the write path**; binaries/notarization remain.
 
@@ -167,7 +171,7 @@ Grow beyond the JA11, evidence‑first.
 
 1. ⏳ **JCALLY JM12 first‑class**: fingerprint (`probe`/`fingerprint`), a documented flash + a
    one‑command revert (bring your own stock image — no dump path exists).
-2. ⏳ **Compatibility matrix from real data** — see [Appendix C](#appendix-c--compatibility-data-model).
+2. ⏳ **Compatibility matrix from real data** — see [Appendix B](#appendix-b--compatibility-data-model).
 3. ⏳ **Dongle discovery**: source & fingerprint more KT02H20‑based dongles (Fransun T2 Pro,
    Audiocular A16x, VE ODO, KZ/CCA…); a `probe`‑driven "is this a KT02H20 dongle?" flow.
 
@@ -281,6 +285,8 @@ the raw record of what was confirmed, and the operational context for anyone pic
 | `flash-cdc` full reflash of `JA11_V2.2.bin` | 67 packets, all ACKed; device re‑enumerated to `2972:0102` — Mac + OrbStack, 2026‑09‑05 |
 | **Serial transport (CDC‑ACM tty) drives the full protocol**, not just libusb bulk | `bootdiag --send` (KTM→`0x78`) *and* a complete `flash-cdc --execute` (67/67 packets, erase, `STP`, `RESET`) over `/dev/ttyACM0` — Debian 13 VM, 2026‑09‑05 (§ below) |
 | A repeated `KTM` after the handshake is already consumed gets **zero bytes back**, not garbage | `flash-cdc` on an already‑progressed bootloader → `KTM: expected [78], got [] after 800ms` — clean, safe, non‑destructive failure; journal recorded `Staged`→`Failed`, `safe_next_action: CancelOrBegin` |
+| **Native macOS `unlock` works** via `IOHIDManager` — the project's own long‑standing "macOS can't drive this" claim was wrong | `IOHIDDeviceSetReport` returns success and the device re‑enumerates as `8888:cdc0`, confirmed by `ioreg` and `/dev/cu.usbmodem101` appearing — `ktmac unlock --send`, 2026‑09‑05, no OrbStack |
+| A complete `flash-cdc` write works fully macOS‑native (serial transport, no OrbStack, no libusb) | 67/67 packets ACKed, erase, `STP`, `RESET` clean; device re‑enumerated with the same descriptor SHA‑256 as before — 2026‑09‑05, same session as the Linux‑native proof |
 
 ## Operational gotchas
 
@@ -367,6 +373,57 @@ is Red Hat choosing not to ship USB/IP client support, not a packaging gap to ro
 `dnf search` harder. It blocks *this rig* (dongle reached via `usbipd-win`), not `ktflash` itself
 — a real RHEL machine with the dongle plugged in directly would never hit this. Decision: leave
 Alma's hardware validation for whenever the dongle can be plugged into a native Linux box.
+
+## 2026‑09‑05 (same day) — macOS‑native validation, session narrative
+
+The dongle moved from the Windows lab straight to the Mac used for this whole project. What
+follows overturns a claim this project had carried since its very first commit.
+
+**The premise everyone had been working from.** `docs/PROTOCOL.md` stated flatly that
+`IOHIDDeviceSetReport` "goes down the control pipe the firmware ignores" on macOS, and
+`docs/MACOS-NATIVE.md` itself — the plan document for exactly this investigation — noted that a
+*different* file, `docs/dongle-investigation.md`, disagreed: it had found `SetReport` working
+natively via `IOHIDManager` on a different dongle (a KZ C04). The two docs contradicted each
+other, and the project had built its entire macOS story (OrbStack, for everything) on the
+pessimistic one without ever running the fifteen‑minute experiment that would settle it.
+
+**The blocker turned out to be a permission dialog, not a protocol limitation.** Building
+`staging/macos-native/ktmac` (Swift, `swift build`, clean) and running `selftest` passed all 13
+hardware‑free checks immediately — IOKit USB enumeration needs no special permission at all.
+`ktmac list` correctly identified the dongle natively. But `ktmac unlock` (dry run) failed with
+`IOHIDManagerOpen: kIOReturnNotPermitted` — macOS TCC (Input Monitoring), not a USB error, and
+`ktmac` prints exactly that distinction instead of a bare hex code. Nimbalyst (the app hosting
+this session's terminal) needed Input Monitoring granted in System Settings, then a full
+quit‑and‑relaunch — a background reload isn't enough, TCC checks the running process's
+entitlement at launch.
+
+**Once granted, the dry run worked immediately** — `IOHIDManagerOpen` succeeded, found the
+target device, and printed the exact report it would send (`report id=0x54 bytes=[54 31 32 33
+34 35 36 37 38 00]`). Then the real experiment: `ktmac unlock --send`. `IOHIDDeviceSetReport`
+returned success, and five seconds later: `PASS (bootloader appeared)`. Independently confirmed
+via `ioreg` (idVendor `34952`/`0x8888`, idProduct `52672`/`0xcdc0`) and by macOS publishing
+`/dev/cu.usbmodem101` for it — not just an API return code, an actual re‑enumerated device.
+
+**The second half fell into place without any new code.** `ktflash bootdiag` (the existing Rust
+binary, built earlier this session for the Linux‑native work) auto‑selected the serial transport
+and opened `/dev/cu.usbmodem101` cleanly — no flags, no OrbStack, no libusb, no sudo. A dry‑run
+`flash-cdc` against the same `JA11_V2.2.bin` used throughout this session printed an identical
+plan to every other platform. Then, with explicit go‑ahead: `ktflash flash-cdc --transport
+serial --image JA11_V2.2.bin --execute --yes` — `KTM`, `CHP` (13‑byte info blob), `ERASE`, `PWO`,
+`KSTA` (erase), all 67 data packets ACKed, `STP`, `RESET`, all clean, first attempt, no power‑cycle
+needed this time (the bootloader was still fresh — nothing had touched it since `unlock`). The
+device re‑enumerated as `2972:0102`, and `ktflash fingerprint` reported the **same descriptor
+SHA‑256** as every prior check this session.
+
+**What this actually means, precisely stated.** `ktflash unlock` (the Rust binary, via `rusb`)
+still cannot claim the interface on macOS — that half of the original claim was correct, and
+remains true. What was wrong was the *conclusion drawn from it*: that macOS categorically
+couldn't do the unlock. A different API (`IOHIDManager`, not libusb) reaches the same device
+without claiming anything, because HID and interrupt‑pipe access don't require the interface
+claim that blocks `rusb`. The full pipeline is proven and OrbStack‑free — but it is **two
+binaries** today (`ktmac` for unlock, `ktflash` for everything else), not one. Merging
+`ktmac`'s IOKit calls into `ktflash` itself is open work, tracked in
+[`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) §8.
 
 ## Windows box VELOCE (recovery + RE source)
 

@@ -22,6 +22,15 @@
   (no logind seat) — `GROUP="plugdev"` is now uncommented by default.
 - Documented a hard AlmaLinux/RHEL limitation: `kernel-devel` ships no `vhci-hcd` driver source,
   so RHEL-family guests can't be USB/IP clients at all (blocks this test rig, not `ktflash`).
+- **macOS-native, no OrbStack, same day**: this project's own long-standing claim that macOS
+  can't drive the HID `unlock` at all was **wrong** — `IOHIDManagerOpen`/`IOHIDDeviceSetReport`
+  via the `ktmac` Swift companion (`staging/macos-native/ktmac`) reaches the device natively
+  (the only prerequisite is Input Monitoring consent, macOS TCC). Confirmed on real hardware:
+  `ktmac unlock --send` triggered the bootloader, then `ktflash flash-cdc --transport serial`
+  did a complete write — 67/67 packets, same descriptor SHA-256 as before. Corrected the wrong
+  claim in `docs/PROTOCOL.md`, `docs/FLASHING.md`, `usbtransport.rs`, and `orbstack/README.md`
+  (now demoted to a documented fallback, not the only path). `ktmac` is not yet merged into
+  `ktflash` itself — tracked in `docs/MACOS-NATIVE.md` §8.
 
 ## [1.1.1] — 2026‑09‑05
 

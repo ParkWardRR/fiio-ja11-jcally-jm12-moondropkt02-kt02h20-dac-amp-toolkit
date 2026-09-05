@@ -12,9 +12,10 @@ behind Qt's threaded‑functor indirection (the chunked write loop), that is cal
 > [!NOTE]
 > This page documents the **normal‑mode HID protocol**. The actual firmware **download**
 > happens *after* the unlock, in a separate **CDC serial bootloader** (`0x8888:0xCDC0`) —
-> see [Bootloader](#bootloader-the-actual-download-target) below. Also note **macOS can't
-> drive this natively**: `IOHIDDeviceSetReport` uses the control pipe the firmware ignores,
-> and libusb can't claim the kernel‑owned interface. Use Linux/OrbStack (this project's path).
+> see [Bootloader](#bootloader-the-actual-download-target) below. **Corrected 2026‑09‑05:**
+> earlier revisions of this page claimed macOS couldn't drive the unlock natively
+> (`IOHIDDeviceSetReport` supposedly going down a control pipe the firmware ignores). That was
+> wrong for the JA11 — confirmed on real hardware via `IOHIDManager`, see the macOS caveat below.
 
 ---
 
@@ -22,13 +23,23 @@ behind Qt's threaded‑functor indirection (the chunked write loop), that is cal
 
 - Plain **HID output reports** (`hid_write`, interrupt‑OUT ep `0x03`) and **input reports**
   (`hid_read_timeout`, interrupt‑IN ep `0x83`). Not feature reports, not `DeviceIoControl`.
-  The reference CLI uses **`rusb`/libusb** interrupt transfers (from Linux/OrbStack).
+  The reference CLI (`ktflash`) uses **`rusb`/libusb** interrupt transfers (Linux/OrbStack —
+  `rusb` on macOS still can't claim this interface). A **second, native macOS path** exists via
+  `IOHIDManager` (the `ktmac` companion tool, `staging/macos-native/ktmac`) — same wire bytes,
+  different API, no interface claim needed. Not yet merged into `ktflash` itself.
 - Commands live on the vendor HID collection at **usage page `0xFF01`**, report IDs
   `0x4B` and `0x54` — **not** the media-key collection (usage page `0x0C`).
-- **macOS caveat:** `IOHIDDeviceSetReport` sends output reports down the *control* pipe,
-  which the firmware ignores (it reads the interrupt‑OUT endpoint), and libusb can't claim
-  the kernel‑owned interface. So the transport works from Linux/OrbStack, not
-  native macOS.
+- **macOS caveat (corrected 2026‑09‑05):** this page previously claimed
+  `IOHIDDeviceSetReport` couldn't reach the device natively on macOS. **That was wrong**,
+  confirmed by direct experiment (`staging/macos-native/ktmac`, E1 in
+  [`MACOS-NATIVE.md`](MACOS-NATIVE.md) §4): `IOHIDDeviceSetReport(dev, kIOHIDReportTypeOutput,
+  0x54, buf, 10)` via `IOHIDManager`, matching the `0xFF01` collection, works — the device
+  re‑enumerates as `8888:cdc0` exactly as it does via Linux/OrbStack. The only prerequisite is
+  **Input Monitoring** consent for the calling app (macOS TCC, since 10.15) — without it,
+  `IOHIDManagerOpen` fails with `kIOReturnNotPermitted` before any USB device is even touched,
+  which is what produced the original false negative. libusb still can't claim the
+  kernel‑owned *normal‑mode* interface — that part was correct — but the HID route sidesteps
+  it entirely, and `ktflash` never needed libusb for `unlock` in the first place.
 - Device: **VID `0x31B2`** (KTMicro). The JA11's runtime PID is `0x0111`.
 
 ## Commands
