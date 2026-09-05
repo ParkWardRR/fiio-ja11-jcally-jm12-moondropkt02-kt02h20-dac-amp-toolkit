@@ -1,12 +1,12 @@
 # Plan — native macOS, without OrbStack
 
-**Status:** ✅ **proven end-to-end on real hardware, 2026‑09‑05** — every milestone including N6
-passed (see §5). Both the manual two-step (`ktmac unlock --send` then `ktflash flash-cdc
---transport serial`) and the unified orchestrator (`ktmac flow --image fw.bin --execute`) did a
+**Status:** ✅ **fully done, proven end-to-end on real hardware, 2026‑09‑05.** All of: the manual
+two-step (`ktmac unlock --send` then `ktflash flash-cdc --transport serial`), the unified
+orchestrator (`ktmac flow --image fw.bin --execute`), and now `ktflash unlock` itself
+auto-detecting and shelling out to `ktmac` with no separate invocation needed — all did a
 complete flash on a Mac with **zero OrbStack involvement**, including the post-reset reprobe
-confirming success — device re‑enumerated as a working JA11 with an unchanged descriptor
-SHA‑256. **Open item:** it's still two binaries under the hood (`ktmac` orchestrates, `ktflash`
-does the write) — see §8.
+confirming success. Two processes at runtime (`ktflash` shells out to `ktmac` for the one
+macOS-specific step), by deliberate choice — see §8.
 **Companion to:** [`RELEASE-PLAN.md`](RELEASE-PLAN.md) (M8)
 **Goal:** `ktflash unlock` and `ktflash flash-cdc` run on stock macOS with no OrbStack, no
 container, no VM, no kext, and — critically — **no Apple entitlement that would require a paid
@@ -253,34 +253,42 @@ stays as the known-good fallback).
 
 ---
 
-## 8. Open item — `ktmac`'s unlock is not yet in `ktflash`
+## 8. `ktflash unlock` now uses `ktmac` automatically ✅ *closed 2026‑09‑05*
 
-**Update, same day:** the two-binary flow now has a proper orchestrator — `ktmac flow --image
-fw.bin --execute` (Swift, [`Flow.swift`](../macos/native/ktmac/Sources/KTMacKit/Flow.swift))
-does preflight → dry run → typed `FLASH` confirmation → native unlock → resolve the bootloader's
-`/dev/cu.*` → shell out to `ktflash flash-cdc --transport serial` → `ktflash`'s own post-reset
-reprobe. **Confirmed on real hardware**: a full run completed end-to-end and the reprobe printed
-`Flash confirmed`. It still shells out to `ktflash` rather than reimplementing the protocol —
-"one implementation of the thing that erases firmware, not two" — so the *single-binary* gap
-below is still real, but the *user experience* gap (two commands, two mental models) is closed:
-`ktmac doctor` for readiness, `ktmac flow` for everything else.
+The two-binary flow has a proper orchestrator — `ktmac flow --image fw.bin --execute` (Swift,
+[`Flow.swift`](../macos/native/ktmac/Sources/KTMacKit/Flow.swift)) does preflight → dry run →
+typed `FLASH` confirmation → native unlock → resolve the bootloader's `/dev/cu.*` → shell out to
+`ktflash flash-cdc --transport serial` → `ktflash`'s own post-reset reprobe. **Confirmed on real
+hardware**: a full run completed end-to-end and the reprobe printed `Flash confirmed`.
 
-What's still open is the single-binary question: `ktflash unlock` (typed directly, on macOS,
-without `ktmac`) still goes through `rusb` and fails exactly as `PROTOCOL.md` used to (correctly)
-describe for the *libusb* path.
+**And now `ktflash unlock` itself picks up the native path with no separate `ktmac` invocation
+needed.** [`macos_ktmac.rs`](../flasher/src/macos_ktmac.rs) implements option 2 below: on macOS,
+`try_unlock()` (shared by the CLI `unlock` command and the TUI) looks for a `ktmac` binary —
+`KTMAC_PATH` env override, then next to the running `ktflash` executable, then `$PATH` — and
+shells out to `ktmac unlock --send` if found, falling back to the `rusb` attempt (which still
+correctly fails with a pointer to build `ktmac` or use OrbStack) if not. **Confirmed on real
+hardware**: with `ktmac` on `$PATH`, `ktflash unlock` triggered the bootloader with no manual
+two-step, `ktflash flash-cdc` finished the write, and the reprobe confirmed the result — the
+entire pipeline through one binary's command, `ktmac` invoked transparently underneath.
 
-Two ways to close this, neither started:
+It is still **two processes** at runtime (`ktflash` shells out to `ktmac`, chosen over an IOKit
+FFI port into Rust — Option 1 below — because it keeps the already-tested Swift code as the
+single source of truth for the one call that can leave a dongle's unlock state disturbed, rather
+than re-deriving it in Rust and risking the two implementations drifting apart). That's a
+deliberate trade, not a compromise: "one binary" was never the actual goal, "no manual second
+command" was, and that's what's proven now.
+
+The two options as originally scoped, for reference:
 
 1. **FFI bindings from Rust to IOKit's `IOHIDManager`** — port `HIDUnlocker.swift`'s logic
    directly into `ktflash` (e.g. via the `io-kit-sys` / `core-foundation` crates, or a thin
-   `objc`/C shim). Single binary, single install; the honest cost is IOKit FFI from Rust being
-   fiddlier than from Swift, which is precisely why this was prototyped in Swift first.
+   `objc`/C shim). True single binary; the honest cost is IOKit FFI from Rust being fiddlier
+   than from Swift, and now also duplicating logic that already exists, tested, in Swift.
 2. **Ship `ktmac` alongside `ktflash`** as a small companion binary for the one macOS‑specific
-   step, and have `ktflash unlock` shell out to it when `--transport serial`/`auto` is selected
-   on macOS. Less elegant, much less work, and keeps the already‑working, already‑tested Swift
-   code as the source of truth instead of re‑deriving it in Rust.
+   step, and have `ktflash unlock` shell out to it. **This is what shipped.**
 
-Whichever direction: the TCC consent prompt (§4.0b) becomes part of the macOS first‑run
-experience for `unlock` specifically, and needs a first‑run message pointing at
-Input Monitoring settings, not a bare `kIOReturnNotPermitted` hex code (both `ktmac` and the
-staging C probes already do this — carry it forward, don't regress to the raw error).
+The TCC consent prompt (§4.0b) is part of the macOS first‑run experience for `unlock`
+specifically — `ktmac`'s own error message already points at Input Monitoring settings rather
+than a bare `kIOReturnNotPermitted` hex code, and that message now surfaces through
+`ktflash unlock`'s own error output unchanged, since `unlock_via_ktmac` passes it through
+verbatim on failure.

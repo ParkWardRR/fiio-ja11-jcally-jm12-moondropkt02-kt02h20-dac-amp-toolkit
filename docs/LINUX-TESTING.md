@@ -246,7 +246,7 @@ Fill in as phases complete. Nothing ships labeled "verified" without its row.
 |---|---|---|:--:|:--:|:--:|:--:|
 | V1 Debian 13 | x86_64 | `cargo build` (source control) | ✅ | ✅ (needs `plugdev`, see Phase 4 finding) | ✅ (both transports; serial + libusb) | ✅ **full write, 67/67 packets, 2026‑09‑05** |
 | V2 Debian 12 | x86_64 | `.deb` | ⏳ | ⏳ | ⏳ | ⏳ |
-| V3 AlmaLinux 10 | x86_64 | `.rpm` | ✅ (build/deps only) | ❌ **blocked**: RHEL kernel excludes `vhci-hcd`; this rig can't attach the dongle at all (§2.3) | ❌ blocked (same cause) | ❌ blocked (same cause) |
+| V3 AlmaLinux 10 | x86_64 | `.rpm` | ✅ (build/deps only) | ➖ **not pursuing**: RHEL kernel excludes `vhci-hcd`; this rig can't attach the dongle at all (§2.3) — the `.rpm` still ships, untested on real Alma hardware | ➖ not pursuing | ➖ not pursuing |
 | V4 AlmaLinux 9 | x86_64 | `.rpm` | ⏳ | ⏳ | ⏳ | ⏳ |
 | V5 Ubuntu 22.04 | x86_64 | musl tarball | ⏳ | ⏳ | ⏳ | ⏳ |
 | V6 Arch *(opt)* | x86_64 | musl tarball | ⏳ | ⏳ | ⏳ | ⏳ |

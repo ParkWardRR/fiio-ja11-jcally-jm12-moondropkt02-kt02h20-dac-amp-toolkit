@@ -7,6 +7,9 @@ Cargo.lock.orig
 # OS
 .DS_Store
 
+# agent tooling (not project content)
+.claude/
+
 # ktflash operation journals (per-flash, user-local; never commit)
 ktflash-*.journal.json
 

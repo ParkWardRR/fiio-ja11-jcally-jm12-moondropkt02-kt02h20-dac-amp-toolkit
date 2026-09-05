@@ -44,12 +44,12 @@ end‑to‑end and gives you a clean Rust CLI + a live TUI to:
 **No Windows, no VM, no container required — on macOS *or* Linux.** The end‑to‑end native
 *write* is ✅ **proven on hardware** three independent ways (2026‑09‑05): from a **Mac +
 OrbStack** (`ktflash flash-cdc`, libusb, no Mac mini/Windows/vendor tool); fully **Linux‑native**
-(same command, serial transport, a Debian 13 VM, no OrbStack); and fully **macOS‑native** —
-`ktmac unlock` (a small Swift companion, `IOHIDManager`) plus `ktflash flash-cdc --transport
-serial` reflashed the stock `JA11_V2.2.bin` with **zero OrbStack involvement**. That last one
-overturned this project's own earlier assumption that macOS couldn't drive the unlock at all —
-see [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md). `ktmac` isn't merged into `ktflash` yet, so
-OrbStack remains the simplest single‑binary path for now.
+(same command, serial transport, a Debian 13 VM, no OrbStack); and fully **macOS‑native** — just
+`ktflash unlock` + `ktflash flash-cdc --transport serial`, with **zero OrbStack involvement**.
+`unlock` auto-detects a small Swift companion (`ktmac`, `IOHIDManager`) if it's built and shells
+out to it, since macOS's own `IOHIDFamily` still blocks libusb from doing this directly — that
+last part overturned this project's own earlier assumption that macOS couldn't drive the unlock
+at all. See [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md).
 
 ---
 
@@ -94,17 +94,16 @@ spec is in **[docs/CDC-PROTOCOL.md](docs/CDC-PROTOCOL.md)** and the RE writeup i
 
 | Host | Identify | Unlock | Native write |
 | --- | --- | --- | --- |
-| **macOS (native, `ktflash` only)** | ✅ | ❌ `rusb` can't claim the interface | ❌ |
-| **macOS (native, + `ktmac`)** | ✅ | ✅ **proven** (`ktmac unlock`, `IOHIDManager`) | ✅ **proven** (`flash-cdc --transport serial`) |
+| **macOS (native)** | ✅ | ✅ **proven** — `ktflash unlock` auto-detects `ktmac` (`IOHIDManager`) if built | ✅ **proven** (`flash-cdc --transport serial`) |
 | **macOS + OrbStack** | ✅ | ✅ | ✅ **proven** (`flash-cdc`, libusb) |
 | **Linux (native)** | ✅ | ✅ | ✅ **proven** (`flash-cdc`, serial transport — Debian 13) |
 
-`ktflash` itself still can't claim the interface for `unlock` on macOS (`IOHIDFamily` owns it) —
-that part of the old assumption was correct. What changed: a **separate, tiny path**
-(`IOHIDManager` instead of libusb, in the `ktmac` companion tool) reaches the device anyway, no
-interface claim needed, and the bootloader it triggers is a plain serial device `ktflash` already
-drives natively. OrbStack remains the simplest **single‑binary** path until `ktmac` is merged in
-— see [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) for the full story and open item.
+`rusb`/libusb genuinely can't claim the interface for `unlock` on macOS (`IOHIDFamily` owns
+it) — that part of the old assumption was correct. What changed: `ktflash unlock` now
+auto-detects a `ktmac` binary (`KTMAC_PATH`, next to itself, or on `$PATH`) and shells out to it
+— `IOHIDManager` reaches the device with no interface claim needed — falling back to the old
+libusb attempt (and its OrbStack suggestion) if `ktmac` isn't built. One command either way; see
+[`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) for why it's still two processes under the hood.
 **Linux needs no detour at all**: install the [udev rules](packaging/99-ktflash.rules) and
 `ktflash` drives everything over the CDC‑ACM tty directly. Prebuilt binaries (both OSes) are ⏳
 next — for now, `cargo build --release` from source. Full validation notes (including a real
@@ -161,16 +160,25 @@ Full table + how to vet a candidate → **[docs/COMPATIBILITY.md](docs/COMPATIBI
 - ✅ **Protocol fully reversed + native write PROVEN on hardware, three ways** — `ktflash
   flash-cdc` did a complete reflash of the stock `JA11_V2.2.bin` from a Mac + OrbStack (`v1.1.0`),
   fully Linux‑native over the serial transport on a Debian 13 VM, and fully **macOS‑native** (no
-  OrbStack at all, via the `ktmac` companion for `unlock`) — all 2026‑09‑05. The macOS‑native
-  result overturned this project's own earlier "macOS can't drive the unlock" assumption; see
-  [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) and [ROADMAP Phase 4](ROADMAP.md).
+  OrbStack at all) — all 2026‑09‑05. The macOS‑native result overturned this project's own
+  earlier "macOS can't drive the unlock" assumption; see [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md)
+  and [ROADMAP Phase 4](ROADMAP.md).
+- ✅ **`ktflash unlock` auto-detects the native macOS path** — no separate `ktmac` invocation
+  needed; it shells out to `ktmac` automatically if built, falling back to the OrbStack-suggesting
+  error otherwise.
 - ❌ **Firmware backup is not possible in software** on the KT02H20 (no read command; the
   normal‑mode reader is inert on this silicon) — keep your original image. [Why.](docs/CDC-PROTOCOL.md)
-- 🚧 **Next:** merge `ktmac`'s native unlock into `ktflash` itself (currently two binaries);
-  prebuilt binaries (Linux + macOS); more KT02H20 dongles; AlmaLinux/RHEL hardware validation on
-  a native (non‑USB/IP) machine.
+- 🚧 **Next:** prebuilt binaries (Linux + macOS); more KT02H20 dongles.
 - 🟡 **Wanted:** before/after descriptors from any dongle you flash; **PCB photos / JTAG‑SWD pad
   locations** (the only path to a real backup); a JCALLY JM12 + its stock image.
+
+> **Not pursuing: AlmaLinux/RHEL hardware validation.** RHEL's kernel packaging deliberately
+> excludes the `vhci-hcd` USB/IP client driver (`kernel-devel`'s `drivers/usb/usbip/` ships only
+> `Kconfig`/`Makefile`, no source), so a RHEL/Alma guest can never be reached over the
+> `usbipd-win`-style rig this project uses for remote hardware testing. This is a RHEL kernel
+> choice, not a `ktflash` limitation — the `.rpm` package and static musl binary are still built
+> and shipped for AlmaLinux/RHEL, and either should work fine on real Alma hardware with the
+> dongle plugged in directly. Details: [ROADMAP Appendix D](ROADMAP.md).
 
 Full plan (done vs. next) → **[ROADMAP.md](ROADMAP.md)**. Tooling is **Rust + shell** (no Python).
 

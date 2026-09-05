@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased] — `ktmac` merged into `ktflash unlock`; AlmaLinux/RHEL validation dropped
+
+### Added
+- **`flasher/src/macos_ktmac.rs`** — `ktflash unlock` (and the TUI's unlock action) now
+  auto-detects a `ktmac` binary on macOS (`KTMAC_PATH` env, next to the running executable, or
+  `$PATH`) and shells out to it, instead of requiring a separate manual `ktmac unlock --send`
+  step. Falls back to the previous `rusb` attempt (and its OrbStack pointer) if `ktmac` isn't
+  built. Confirmed on real hardware: `ktflash unlock` with no flags triggered the bootloader via
+  `ktmac`, and `ktflash flash-cdc` completed the write on the same run.
+
+### Removed
+- **AlmaLinux/RHEL hardware validation is no longer a project goal.** RHEL's kernel packaging
+  deliberately excludes the `vhci-hcd` USB/IP client driver, so a RHEL/Alma guest can never be
+  reached over this project's `usbipd-win`-based remote test rig. The `.rpm` package and static
+  musl binary still ship for Alma/RHEL — only the "validate it over this remote rig" goal is
+  dropped. See README and `ROADMAP.md` Appendix D for the full finding.
+
 ## [Unreleased] — Linux‑native flash proven on hardware — 2026‑09‑05
 
 ### Added

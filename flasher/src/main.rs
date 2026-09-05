@@ -16,6 +16,8 @@ use std::time::Duration;
 
 mod boottransport;
 mod cmd_flash_cdc;
+#[cfg(target_os = "macos")]
+mod macos_ktmac;
 mod proto;
 mod serialtransport;
 mod tui;
@@ -209,7 +211,12 @@ fn open_hid(ctx: &Context) -> Result<(rusb::DeviceHandle<Context>, u8, u8, u8), 
                     let h = dev.open().map_err(|e| format!("open: {e}"))?;
                     let _ = h.set_auto_detach_kernel_driver(true);
                     h.claim_interface(id.interface_number()).map_err(|e| {
-                        format!("claim iface {}: {e}\n  macOS blocks this — run inside the OrbStack guest (see ../orbstack/).", id.interface_number())
+                        format!(
+                            "claim iface {}: {e}\n  macOS blocks this (IOHIDFamily owns the interface) — \
+                             `ktflash unlock` uses the `ktmac` companion automatically if it's built \
+                             (macos/native/ktmac); otherwise run inside the OrbStack guest (see ../orbstack/).",
+                            id.interface_number()
+                        )
                     })?;
                     return Ok((h, id.interface_number(), o, i));
                 }
@@ -220,7 +227,17 @@ fn open_hid(ctx: &Context) -> Result<(rusb::DeviceHandle<Context>, u8, u8, u8), 
 }
 
 /// Send the "T12345678" unlock; returns a human message. Used by CLI + TUI.
+///
+/// On macOS, `rusb` can never claim this interface (`IOHIDFamily` owns it) — confirmed,
+/// unfixable from within libusb. If the `ktmac` companion binary is available
+/// ([`macos_ktmac::find_ktmac`]), this shells out to it instead: `IOHIDManager` reaches the same
+/// device without claiming anything. See `docs/MACOS-NATIVE.md` for why the two differ.
 pub fn try_unlock() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    if let Some(ktmac) = macos_ktmac::find_ktmac() {
+        return macos_ktmac::unlock_via_ktmac(&ktmac);
+    }
+
     let ctx = Context::new().map_err(|e| e.to_string())?;
     let (h, iface, out_ep, _in) = open_hid(&ctx)?;
     let mut pkt = vec![0x54u8];

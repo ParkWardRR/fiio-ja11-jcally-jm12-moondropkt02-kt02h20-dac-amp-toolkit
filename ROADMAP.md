@@ -21,13 +21,14 @@ Windows is only ever a reverse‑engineering source.
 > **The native write is proven on hardware on *three* independent paths now**, all 2026‑09‑05:
 > **macOS + OrbStack** (`v1.1.0`, raw libusb); **Linux‑native over the serial transport**
 > (`v1.1.1`+, a Debian 13 VM reached over `usbipd-win` from a Windows host, no OrbStack); and
-> **macOS‑native with zero OrbStack** — `ktmac unlock` (Swift, `IOHIDManager`) plus `ktflash
-> flash-cdc --transport serial`, on the same Mac used for this session. That last one **overturned
-> this project's own long-standing assumption** that macOS couldn't drive the unlock at all — see
-> [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) and Appendix D. Phases 0–4 are complete. The
-> frontier now is **merging `ktmac` into `ktflash`** (still two binaries today), **prebuilt
-> binaries**, and **Phase 6 (more dongles)**. **Phase 5 (software backup) is closed as *not
-> possible* on this silicon** — it needs hardware.
+> **macOS‑native with zero OrbStack** — `ktflash unlock` (auto-detecting and shelling out to the
+> `ktmac` Swift companion, `IOHIDManager`) plus `ktflash flash-cdc --transport serial`, on the
+> same Mac used for this session. That last one **overturned this project's own long-standing
+> assumption** that macOS couldn't drive the unlock at all — see
+> [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) and Appendix D. Phases 0–4 are complete,
+> including the `ktmac`↔`ktflash` merge. The frontier now is **prebuilt binaries** and
+> **Phase 6 (more dongles)**. **Phase 5 (software backup) is closed as *not possible* on this
+> silicon** — it needs hardware.
 
 ---
 
@@ -302,6 +303,7 @@ the raw record of what was confirmed, and the operational context for anyone pic
 | A complete `flash-cdc` write works fully macOS‑native (serial transport, no OrbStack, no libusb) | 67/67 packets ACKed, erase, `STP`, `RESET` clean; device re‑enumerated with the same descriptor SHA‑256 as before — 2026‑09‑05, same session as the Linux‑native proof |
 | `ktmac flow` (the unified preflight→dry‑run→unlock→flash→reprobe orchestration, calling `ktflash` as a subprocess) works end‑to‑end on real hardware | Full run completed with `--execute --yes`; device came back as a working `2972:0102` JA11 — first hardware run of `Flow.swift`, previously "STATUS: UNTESTED against hardware" |
 | The post‑reset reprobe (`proto::postflash`, ROADMAP Phase 3.4) correctly detects success | `flash-cdc --expect 2972:0102 --execute --yes` printed `[reprobe] ✅ 2972:0102 — Flash confirmed`; `ktflash recover` then reported `Confirmed` / `Done` instead of the old ceiling of `ResetIssued` / `WaitAndReprobe` |
+| `ktflash unlock` triggers the native macOS path with no separate `ktmac` invocation | With `ktmac` on `$PATH`, plain `ktflash unlock` (no flags) shelled out to it automatically and triggered the bootloader; `ktflash flash-cdc` then completed the write on the same run — `macos_ktmac.rs`, 2026‑09‑05 |
 
 ## Operational gotchas
 
@@ -386,8 +388,16 @@ for nothing usbip‑related — EPEL doesn't have it either). The dead end was s
 driver's `.c` source is not there**, and `vhci-hcd` isn't in `kernel-modules-extra` either. This
 is Red Hat choosing not to ship USB/IP client support, not a packaging gap to route around with
 `dnf search` harder. It blocks *this rig* (dongle reached via `usbipd-win`), not `ktflash` itself
-— a real RHEL machine with the dongle plugged in directly would never hit this. Decision: leave
-Alma's hardware validation for whenever the dongle can be plugged into a native Linux box.
+— a real RHEL machine with the dongle plugged in directly would never hit this.
+
+**Decision, 2026‑09‑05: not pursuing AlmaLinux/RHEL hardware validation as a project goal.**
+The `.rpm` package and static musl binary still ship for AlmaLinux/RHEL (§2 of
+[`RELEASE-PLAN.md`](docs/RELEASE-PLAN.md) — the static build is distro-agnostic by design), and
+either should work fine on real Alma hardware with the dongle plugged in directly. What's out of
+scope is chasing a *remote* validation path for it — this project's remote test rig fundamentally
+cannot reach a RHEL guest over USB/IP, and standing up different infrastructure (a hypervisor
+with true USB passthrough, or physical Alma hardware) isn't worth it for one distro family when
+Debian's result already proves the Linux-native path works.
 
 ## 2026‑09‑05 (same day) — macOS‑native validation, session narrative
 
@@ -439,6 +449,19 @@ claim that blocks `rusb`. The full pipeline is proven and OrbStack‑free — bu
 binaries** today (`ktmac` for unlock, `ktflash` for everything else), not one. Merging
 `ktmac`'s IOKit calls into `ktflash` itself is open work, tracked in
 [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) §8.
+
+**Follow-up, same day — the "two binaries" gap closed, without going to one binary.**
+`flasher/src/macos_ktmac.rs` gives `try_unlock()` (shared by the CLI `unlock` command and the
+TUI) a macOS-only first move: look for a `ktmac` binary (`KTMAC_PATH` env override, next to the
+running `ktflash` executable, then `$PATH`), and if found, shell out to `ktmac unlock --send`
+instead of attempting the `rusb` claim that's known to fail. Confirmed on hardware: with `ktmac`
+built and on `$PATH`, plain `ktflash unlock` triggered the bootloader with no manual two-step,
+and `ktflash flash-cdc` finished the write with the reprobe confirming success — one command,
+same Mac, same dongle. Chose the companion-process design over an IOKit FFI port into Rust
+deliberately: it keeps the already-tested Swift code as the single source of truth for the one
+call that can leave a dongle's unlock state disturbed, rather than re-deriving it in Rust and
+risking the two implementations drifting apart. Two processes at runtime, but zero manual steps
+— which was the actual goal.
 
 ## Windows box VELOCE (recovery + RE source)
 
