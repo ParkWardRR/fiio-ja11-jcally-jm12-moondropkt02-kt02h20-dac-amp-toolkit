@@ -1,5 +1,37 @@
 # Changelog
 
+## [Unreleased] — prebuilt binaries built + signed locally (not yet published)
+
+### Added
+- macOS universal binary (`aarch64`+`x86_64` via `lipo`, ad-hoc signed after lipo per
+  `docs/RELEASE-PLAN.md` §4.2) — runs and correctly identifies real hardware.
+- `x86_64`/`aarch64` `unknown-linux-musl` static binaries via `cargo-zigbuild --features
+  vendored` — `file` confirms "statically linked", no runtime dependencies.
+- `.deb` (via `cargo-deb`) and `.rpm` (via `cargo-generate-rpm`), both built from the static
+  x86_64 musl binary — contents inspected and correct (binary, udev rules, docs, maintainer
+  scripts all present at the right paths).
+- `SHA256SUMS` + a real minisign signature (`packaging/ktflash.pub` committed; secret key held
+  offline, encrypted with a random passphrase, never in this repo) — both verify.
+
+### Fixed
+- **`serialtransport.rs`**: `libc::ioctl`'s request-parameter type differs between glibc
+  (`c_ulong`) and musl (`c_int`) — a real bug that only surfaced by actually cross-compiling to
+  `x86_64-unknown-linux-musl`, since every prior Linux build/test ran natively against glibc.
+  Fixed with `as _` at the call site so the cast targets whichever type the platform declares.
+- **`flasher/Cargo.toml`**: `cargo-generate-rpm` v0.21.0's actual schema for
+  `post_install_script` is a plain string (optionally a path to a script file), not the
+  `{ program, script }` table that had been drafted by analogy with other formats. Also added
+  `auto-req = "disabled"` — `requires = {}` alone doesn't stop the tool from shelling out to
+  `ldd` for dependency auto-detection, which fails outright on a host with no `ldd`.
+- **`flasher/Cargo.toml`**: the package `description` still said "from macOS + OrbStack" as the
+  only path, surfaced by actually reading the built `.deb`'s control file.
+
+### Not done, deliberately
+- Not published — `gh release create` is a separate, visible decision, held for explicit go/no-go.
+- Signing key needs to move from local encrypted-at-rest storage to durable secure custody
+  (password manager or hardware key) before any real release.
+- `.deb`/`.rpm` not installed on a live guest — no such host was available at build time.
+
 ## [Unreleased] — `ktmac` merged into `ktflash unlock`; AlmaLinux/RHEL validation dropped
 
 ### Added

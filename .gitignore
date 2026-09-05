@@ -1,6 +1,8 @@
 # Rust
 /target
 flasher/target
+flasher/dist/
+dist/
 **/*.rs.bk
 Cargo.lock.orig
 

@@ -105,9 +105,10 @@ auto-detects a `ktmac` binary (`KTMAC_PATH`, next to itself, or on `$PATH`) and 
 libusb attempt (and its OrbStack suggestion) if `ktmac` isn't built. One command either way; see
 [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md) for why it's still two processes under the hood.
 **Linux needs no detour at all**: install the [udev rules](packaging/99-ktflash.rules) and
-`ktflash` drives everything over the CDC‑ACM tty directly. Prebuilt binaries (both OSes) are ⏳
-next — for now, `cargo build --release` from source. Full validation notes (including a real
-RHEL/AlmaLinux limitation with USB/IP test rigs) → [ROADMAP Phase 4](ROADMAP.md).
+`ktflash` drives everything over the CDC‑ACM tty directly. Prebuilt binaries (macOS universal,
+Linux musl `x86_64`/`aarch64`, `.deb`, `.rpm`) are **built and signed, not yet published** — for
+now, `cargo build --release` from source. Full validation notes (including a real RHEL/AlmaLinux
+limitation with USB/IP test rigs) → [ROADMAP Phase 4](ROADMAP.md).
 
 ---
 
@@ -168,7 +169,8 @@ Full table + how to vet a candidate → **[docs/COMPATIBILITY.md](docs/COMPATIBI
   error otherwise.
 - ❌ **Firmware backup is not possible in software** on the KT02H20 (no read command; the
   normal‑mode reader is inert on this silicon) — keep your original image. [Why.](docs/CDC-PROTOCOL.md)
-- 🚧 **Next:** prebuilt binaries (Linux + macOS); more KT02H20 dongles.
+- 🚧 **Next:** publish the prebuilt binaries as a GitHub release (already built and signed
+  locally); more KT02H20 dongles.
 - 🟡 **Wanted:** before/after descriptors from any dongle you flash; **PCB photos / JTAG‑SWD pad
   locations** (the only path to a real backup); a JCALLY JM12 + its stock image.
 

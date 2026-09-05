@@ -2,7 +2,7 @@
 name = "ktflash"
 version = "1.1.1"
 edition = "2021"
-description = "Beautiful TUI + CLI to probe/unlock KTMicro KT02H20 USB-C DAC dongles (FiiO JA11 family) from macOS + OrbStack"
+description = "Beautiful TUI + CLI to probe/unlock/flash KTMicro KT02H20 USB-C DAC dongles (FiiO JA11 family) natively on macOS and Linux"
 license = "BlueOak-1.0.0"
 repository = "https://github.com/ParkWardRR/fiio-ja11-jcally-jm12-moondropkt02-kt02h20-dac-amp-toolkit"
 
@@ -79,11 +79,17 @@ assets = [
 # Static binary: nothing to require. Explicitly empty so rpmbuild's auto-requires (which would
 # pick up glibc from a non-musl build) cannot silently add a dependency the artifact does not need.
 requires = {}
+# `requires = {}` alone isn't enough — cargo-generate-rpm's default auto-req mode still shells
+# out to `ldd` to scan the binary regardless (found by actually running it: fails outright when
+# cross-building on a host with no `ldd`, e.g. macOS). Disable it explicitly; the binary is
+# static, so there is nothing for `ldd` to usefully find even on a host that has it.
+auto-req = "disabled"
 
-[package.metadata.generate-rpm.post_install_script]
-# Reload rules so the dongle works without a reboot; harmless if udev is absent.
-program = "/bin/sh"
-script = """
+# A plain string, not a table (found by actually running cargo-generate-rpm: v0.21.0's schema
+# takes `post_install_script` as a scriptlet string, unlike cargo-deb's separate
+# maintainer-scripts file). No `if [ "$1" = "configure" ]` guard here — that's a dpkg convention
+# for the .deb postinst (packaging/deb/postinst); RPM's %post doesn't use $1 the same way.
+post_install_script = """
 if command -v udevadm >/dev/null 2>&1; then
   udevadm control --reload-rules >/dev/null 2>&1 || :
   udevadm trigger >/dev/null 2>&1 || :

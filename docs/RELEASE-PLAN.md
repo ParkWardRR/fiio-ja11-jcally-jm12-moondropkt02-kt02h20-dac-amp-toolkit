@@ -1,6 +1,13 @@
 # Release plan — prebuilt executables + Linux release
 
-**Status:** plan (nothing here is built yet) · **Feeds:** ROADMAP Phase 4
+**Status:** ✅ **M1–M2 built and verified locally, 2026‑09‑05** (macOS universal binary +
+ad-hoc sign, both Linux musl targets via `cargo-zigbuild --features vendored`, `.deb` via
+`cargo-deb`, `.rpm` via `cargo-generate-rpm`, checksums + minisign signature, all cross-verified)
+— **not yet published** (`gh release create` needs an explicit go/no-go, see §11). Found and
+fixed two real bugs that only surfaced by actually running the tools: a `libc::ioctl` request-type
+mismatch between glibc and musl (`serialtransport.rs`), and `cargo-generate-rpm` v0.21.0's actual
+schema for `post_install_script` (a string, not a table) plus its default `ldd`-based
+auto-requires needing explicit disabling on a host with no `ldd`. **Feeds:** ROADMAP Phase 4
 **Supersedes in detail:** [`RELEASING.md`](RELEASING.md) (which stays as the short pre-release checklist)
 **Companions:** [`LINUX-TESTING.md`](LINUX-TESTING.md) (validation) · [`MACOS-NATIVE.md`](MACOS-NATIVE.md) (dropping OrbStack)
 
@@ -280,11 +287,11 @@ multi-arch manifest to maintain.
 
 | # | Milestone | Contents | Gate |
 |---|---|---|---|
-| **M1** | Build foundation | `vendored` feature, `rust-toolchain.toml`, `release.sh`, zigbuild targets, checksums + minisign | `ci.sh` green; musl binary is verifiably static |
-| **M2** | Linux artifacts | musl tarballs, `.deb`, `.rpm`, udev fixes (§5.3) | packages lint clean; install cleanly once VMs exist |
-| **M3** | macOS executable | universal binary, ad-hoc sign after `lipo`, unsigned-run docs | `probe`/TUI run from a fresh download on a clean Mac |
-| **M4** | Install UX | `install.sh` with verify-before-install, README/docs rework | end-to-end install on macOS + one Linux host |
-| **M5** | **v1.2.0 release** | `gh release create`, honest labels | [`LINUX-TESTING.md`](LINUX-TESTING.md) P0–P1 pass; P2/P3 may still be ⏳ *if labeled* |
+| **M1** | Build foundation | `vendored` feature, `rust-toolchain.toml`, `release.sh`, zigbuild targets, checksums + minisign | ✅ done — `ci.sh` green; both musl binaries verifiably static (`file` confirms) |
+| **M2** | Linux artifacts | musl tarballs, `.deb`, `.rpm`, udev fixes (§5.3) | ✅ done — `.deb` contents inspected (binary, udev rules, docs, `postinst` all present, correct paths); `.rpm` lead magic verified; both built from the real static x86_64 musl binary. *Not yet installed on a live guest* — `dpkg`/`rpm` tooling doesn't exist on macOS to test that half |
+| **M3** | macOS executable | universal binary, ad-hoc sign after `lipo`, unsigned-run docs | ✅ done — `lipo -info` confirms both arches, `codesign --verify` passes, `probe` runs and correctly identifies real hardware |
+| **M4** | Install UX | `install.sh` with verify-before-install, README/docs rework | ⏳ script exists, syntax-checked, but never run end-to-end (needs a published release to download from) |
+| **M5** | **v1.2.0 release** | `gh release create`, honest labels | ⏳ **awaiting an explicit go/no-go** — artifacts are built, signed, and verified locally (§0 status line); publishing is a separate, visible decision |
 | **M6** | Hardware sign-off | Linux-native `unlock` + `flash-cdc` on real hardware | flips ROADMAP Phase 4.1 to ✅ |
 | **M7** | Notarization + tap | Developer ID, `notarytool`, `.pkg` decision, Homebrew tap | **needs Apple Developer account** |
 | **M8** | macOS native | see [`MACOS-NATIVE.md`](MACOS-NATIVE.md) — drops OrbStack | tracked separately; not a release blocker |
@@ -313,12 +320,11 @@ multi-arch manifest to maintain.
 
 ## 10. File inventory
 
-> `rust-toolchain.toml`, `scripts/release.sh`, `scripts/install.sh`, and the
-> `[package.metadata.deb]` / `[package.metadata.generate-rpm]` blocks in `flasher/Cargo.toml`
-> have landed but are untested — none has been run for real (no minisign key, no cargo-deb /
-> cargo-generate-rpm / cargo-zigbuild run). See [`staging/APPLY.md`](../staging/APPLY.md) for
-> what is still open (the docs pass below, and the minisign key generation, which is a
-> supply-chain decision made separately).
+> **Update, 2026‑09‑05:** the file inventory below has fully landed, and — unlike when this note
+> was written — has now actually been run for real: a minisign key exists (§11), and
+> `cargo-deb`/`cargo-generate-rpm`/`cargo-zigbuild` all produced real, verified artifacts. See §11
+> for what that surfaced. `scripts/release.sh` itself (the one-command wrapper around all of
+> this) has still not been executed end-to-end — the steps above were run individually by hand.
 
 ```
 rust-toolchain.toml                 new   pinned channel + release targets
@@ -338,3 +344,44 @@ docs/RELEASING.md                   edit  shrink to checklist → points here
 README.md                           edit  download-first quickstart
 ROADMAP.md / CHANGELOG.md           edit  Phase 4 progress, v1.2.0
 ```
+
+---
+
+## 11. What actually happened when this plan was executed (2026‑09‑05)
+
+Two bugs found only by running the tools for real, not by reasoning about the plan:
+
+1. **`libc::ioctl`'s request-type mismatch, glibc vs. musl.** `serialtransport.rs`'s `TIOCMBIS`
+   constant is declared `libc::c_ulong` for both platforms, which matches what `ioctl` wants on
+   glibc — but `cargo zigbuild --target x86_64-unknown-linux-musl` failed to compile with a type
+   error, because musl's `libc::ioctl` signature takes `c_int` for the request parameter instead.
+   This had never been caught because every prior Linux build (including the real hardware
+   validation on the Debian 13 VM) compiled natively against **glibc**, never musl. Fixed with
+   `tio::TIOCMBIS as _` at the call site, which lets the cast target whichever type the platform
+   actually declares.
+2. **`cargo-generate-rpm` v0.21.0's real schema differs from what was drafted.**
+   `post_install_script` must be a plain string (optionally a path to a script file), not a
+   `{ program, script }` table — the manifest had the latter, guessed by analogy with other
+   packaging formats, and the tool rejected it outright (`must be string`). Separately,
+   `requires = {}` does **not** stop the tool from shelling out to `ldd` for auto-detected
+   dependencies by default — on a host with no `ldd` (macOS, cross-building), this failed
+   completely regardless of the manifest. Fixed with `auto-req = "disabled"`.
+
+Both are exactly the kind of thing "we drafted this without running it" plans are supposed to
+surface eventually — better now, from a maintainer's build, than from a user's failed install.
+
+**Artifacts produced** (local only, not published): macOS universal binary (ad-hoc signed) and
+tarball; `x86_64`/`aarch64` `unknown-linux-musl` static binaries and tarballs; `.deb` (from the
+x86_64 musl binary); `.rpm` (same); `SHA256SUMS` + `SHA256SUMS.minisig`. All checksums and the
+minisign signature verify. Not yet installed on a live `.deb`/`.rpm`-capable host — no such host
+was available at build time, and cross-verifying package *contents* (done: binary path, udev
+rule path, docs, maintainer script) is not the same as a live `apt install`/`dnf install`.
+
+**Signing key custody.** A real minisign keypair was generated for this — not a placeholder. The
+public key is committed at `packaging/ktflash.pub` and mirrored into `scripts/install.sh`. The
+**secret key is encrypted at rest with a randomly generated passphrase** (never an empty
+passphrase — an empty-password minisign key is only nominally protected) and lives outside this
+repository. **This needs to move to durable secure storage (a password manager or hardware key)
+before any real release** — right now both the encrypted key file and its passphrase exist as
+plain files on the machine that generated them, which is fine for the local verification done
+here but is not real offline custody.

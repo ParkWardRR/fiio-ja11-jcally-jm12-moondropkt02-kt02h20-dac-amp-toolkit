@@ -19,8 +19,10 @@ set -eu
 
 REPO="ParkWardRR/fiio-ja11-jcally-jm12-moondropkt02-kt02h20-dac-amp-toolkit"
 PREFIX="${KT_PREFIX:-$HOME/.local/bin}"
-# Committed at packaging/ktflash.pub — replace with the real key before publishing.
-MINISIGN_PUBKEY="${KT_PUBKEY:-RWQPLACEHOLDERPLACEHOLDERPLACEHOLDERPLACEHOLDERPLACEHOLDER}"
+# Committed at packaging/ktflash.pub. Generated 2026-09-05; secret key held offline by the
+# maintainer (never in this repo). Rotate by regenerating and updating both this line and the
+# committed .pub file in the same change.
+MINISIGN_PUBKEY="${KT_PUBKEY:-RWRBoKW7XVEQLaslAJsw+ehM+1AGz90YMA+P7GzCzNZV54aVWtS7PC6n}"
 
 say()  { printf '%s\n' "$*"; }
 warn() { printf '\033[1;33m%s\033[0m\n' "$*" >&2; }

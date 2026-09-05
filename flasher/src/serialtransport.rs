@@ -127,7 +127,12 @@ impl SerialTransport {
             // (opens the port) then exchanges framed messages" — do not rely on open(2) doing
             // it, because /dev/cu.* on macOS deliberately does not.
             let bits: libc::c_int = tio::TIOCM_DTR | tio::TIOCM_RTS;
-            if libc::ioctl(self.fd, tio::TIOCMBIS, &bits) != 0 {
+            // `as _` (not a fixed type) on purpose: `libc::ioctl`'s request parameter is
+            // `c_ulong` on glibc targets but `c_int` on musl — found by cross-compiling to
+            // `x86_64-unknown-linux-musl` via cargo-zigbuild (RELEASE-PLAN.md §3.2), which
+            // native compilation on a real (glibc) Linux VM never exercised. `as _` lets the
+            // cast target whichever type the platform's `ioctl` signature actually wants.
+            if libc::ioctl(self.fd, tio::TIOCMBIS as _, &bits) != 0 {
                 // UNVERIFIED: some CDC-ACM implementations reject this. Non-fatal on purpose —
                 // if the bootloader turns out to need it, promote to a hard error.
                 eprintln!(

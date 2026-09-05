@@ -39,7 +39,7 @@ Phase 0  Reverse-engineer to the bootloader ........................... ✅ done
 Phase 1  Hardware-free protocol + safety core ........................ ✅ done
 Phase 2  Reverse the CDC download protocol  ⭐ .................... ✅ done (was the blocker)
 Phase 3  Native flash on hardware (writer)  ⭐ ................... ✅ done — PROVEN on hardware
-Phase 4  Linux + macOS native release (binaries, notarization) ...... ✅ write proven, both OSes · binaries ⏳
+Phase 4  Linux + macOS native release (binaries, notarization) ...... ✅ write + binaries built · release ⏳
 Phase 5  Firmware backup / readback ................................. ❌ not possible in software
 Phase 6  Fleet: JM12, compatibility matrix, dongle discovery ........ ⏳ needs evidence
 ```
@@ -128,7 +128,14 @@ Drop the OrbStack detour on Linux — **done for the write path**; binaries/nota
    erase, `STP`, `RESET` all clean — over `/dev/ttyACM0` on a **Debian 13** VM, no `sudo`, no
    OrbStack, no libusb claim. [`packaging/99-ktflash.rules`](packaging/99-ktflash.rules) needed a
    real fix first: see finding below. Full session narrative → Appendix D.
-2. ⏳ **Prebuilt binaries** (x86_64 + aarch64) via `cross-rs`/`cargo-zigbuild` + SHA‑256 checksums.
+2. ✅ **Prebuilt binaries built and verified locally, 2026‑09‑05**: macOS universal binary
+   (ad-hoc signed after `lipo`), `x86_64`/`aarch64` `unknown-linux-musl` static binaries via
+   `cargo-zigbuild --features vendored` (confirmed static with `file`), `.deb` via `cargo-deb`,
+   `.rpm` via `cargo-generate-rpm`, `SHA256SUMS` + a real minisign signature — all cross-verified.
+   Found and fixed two real bugs along the way (a glibc/musl `libc::ioctl` type mismatch, and
+   `cargo-generate-rpm`'s actual schema differing from the drafted manifest) — see
+   [`docs/RELEASE-PLAN.md`](docs/RELEASE-PLAN.md) §11 for detail. **Not yet published** —
+   `gh release create` is a separate, visible decision.
 3. ⏳ **macOS notarization** (Apple Developer signing) — prerequisite for a Homebrew tap.
 4. ✅ **Reproducibility**: `Cargo.lock` committed; toolchain/target recorded.
 
