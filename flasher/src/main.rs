@@ -5,7 +5,7 @@
 //!   ktflash probe         → one‑shot device report (scriptable)
 //!   ktflash handshake     → normal mode: send the 0x4B/0x33 HID frame, read reply
 //!   ktflash unlock        → send "T12345678" → reboot into the CDC bootloader
-//!   ktflash bootdiag      → probe the 0x8888:0xCDC0 bootloader bulk pipe
+//!   ktflash bootdiag      → probe the 0x8888:0xCDC0 bootloader pipe (--send for a KTM check)
 //!
 //! `unlock`/`handshake`/`bootdiag` *claim the USB interface*, which macOS refuses
 //! (`IOHIDFamily` owns it → LIBUSB_ERROR_ACCESS). Run them inside the OrbStack Linux
@@ -740,48 +740,50 @@ fn cmd_bootdiag_replay(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_bootdiag() -> Result<(), String> {
-    let ctx = Context::new().map_err(|e| e.to_string())?;
-    let dev = ctx
-        .devices()
-        .map_err(|e| e.to_string())?
-        .iter()
-        .find(|d| {
-            d.device_descriptor()
-                .map(|dd| dd.vendor_id() == BOOT_VID && dd.product_id() == BOOT_PID)
-                .unwrap_or(false)
-        })
-        .ok_or("bootloader not present — run `unlock` first")?;
-    let cfg = dev.active_config_descriptor().map_err(|e| e.to_string())?;
-    let mut target = None;
-    for iface in cfg.interfaces() {
-        for id in iface.descriptors() {
-            if id.class_code() != 10 {
-                continue;
+/// `ktflash bootdiag [--transport auto|serial|usb] [--port <dev>] [--send]`
+///
+/// Proves the bootloader pipe is reachable. Two modes, chosen deliberately (APPLY.md step 5):
+///
+/// - **Default: non-advancing.** Just opens the transport (claims the USB interface, or opens +
+///   configures the serial tty) without writing a single byte. Safe to run repeatedly and does
+///   **not** disturb the one-shot bootloader state machine — you can `bootdiag` as many times as
+///   you like and still `flash-cdc` afterward with no re-unlock.
+/// - **`--send`: advancing, definitive.** Sends the `KTM` handshake and waits for its ACK
+///   ([`cmd_flash_cdc::bootdiag_live`]) — a stronger liveness proof, but it consumes the
+///   one-shot handshake. `unlock` again before flashing if you use this.
+///
+/// Migrated off the hardcoded libusb-only path onto [`boottransport`], so this now works over
+/// the serial transport (macOS/Linux) as well as libusb (OrbStack/Linux).
+fn cmd_bootdiag(args: &[String]) -> Result<(), String> {
+    let mut transport_pref = boottransport::Preference::default();
+    let mut port: Option<String> = None;
+    let mut send = false;
+
+    let mut it = args.iter();
+    while let Some(flag_arg) = it.next() {
+        match flag_arg.as_str() {
+            "--transport" => {
+                transport_pref = it
+                    .next()
+                    .ok_or("--transport needs auto|serial|usb")?
+                    .parse::<boottransport::Preference>()?
             }
-            let (mut o, mut i) = (None, None);
-            for e in id.endpoint_descriptors() {
-                if e.transfer_type() == TransferType::Bulk {
-                    match e.direction() {
-                        Direction::Out => o = Some(e.address()),
-                        Direction::In => i = Some(e.address()),
-                    }
-                }
-            }
-            if let (Some(o), Some(i)) = (o, i) {
-                target = Some((id.interface_number(), o, i));
-            }
+            "--port" => port = Some(it.next().ok_or("--port needs a device path")?.clone()),
+            "--send" => send = true,
+            other => return Err(format!("unknown flag for bootdiag: {other}")),
         }
     }
-    let (iface, out_ep, in_ep) = target.ok_or("no CDC-data bulk interface")?;
-    let h = dev.open().map_err(|e| format!("open: {e}"))?;
-    let _ = h.set_auto_detach_kernel_driver(true);
-    h.claim_interface(iface).map_err(|e| format!("claim iface {iface}: {e} (OrbStack/Linux only)"))?;
-    let _ = h.write_control(0x21, 0x20, 0, 0, &[0x00, 0xc2, 0x01, 0x00, 0x00, 0x00, 0x08], TIMEOUT);
-    let _ = h.write_control(0x21, 0x22, 0x0003, 0, &[], TIMEOUT);
-    println!("bootloader claimed; bulk out=0x{out_ep:02x} in=0x{in_ep:02x}.");
-    println!("(the CDC download framing is implemented in `flash-cdc`; this just proves the pipe is live)");
-    let _ = h.release_interface(iface);
+
+    if send {
+        return cmd_flash_cdc::bootdiag_live(transport_pref, port.as_deref());
+    }
+
+    let (_pipe, label) = boottransport::open(transport_pref, port.as_deref())?;
+    println!("bootloader transport open: {label}");
+    println!(
+        "(non-advancing — no bytes sent, the one-shot state machine is untouched.\n \
+         the CDC download framing is implemented in `flash-cdc`; pass --send for a KTM liveness check.)"
+    );
     Ok(())
 }
 
@@ -804,7 +806,9 @@ USAGE:
   ktflash fingerprint structured device fingerprint (JSON)   (no hardware write)
   ktflash handshake   normal mode HID handshake        (OrbStack/Linux)
   ktflash unlock      reboot into the CDC bootloader    (OrbStack/Linux)
-  ktflash bootdiag    probe the bootloader bulk pipe    (OrbStack/Linux)
+  ktflash bootdiag [--transport auto|serial|usb] [--port <dev>] [--send]
+                      probe the bootloader pipe; --send does a KTM liveness check
+                      (advances the one-shot state machine — re-unlock before flashing)
   ktflash image <f>   parse/validate a KT_Helios image  (no hardware)
   ktflash flash --plan <fw.bin> [--device VID:PID] [--manifest m.json]
                       build a flash plan + run the safety gate  (no hardware)
@@ -854,7 +858,7 @@ fn main() {
                 Some(p) => cmd_bootdiag_replay(p),
                 None => Err("usage: ktflash bootdiag --replay <transcript.json>".to_string()),
             },
-            _ => cmd_bootdiag(),
+            _ => cmd_bootdiag(&args[2..]),
         },
         Some("-h") | Some("--help") | Some("help") => {
             println!("{HELP}");

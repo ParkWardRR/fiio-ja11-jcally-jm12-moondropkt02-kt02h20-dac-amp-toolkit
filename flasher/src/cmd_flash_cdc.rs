@@ -210,15 +210,14 @@ fn print_progress(ev: Progress<'_>, total: usize) {
     }
 }
 
-/// Replacement for `cmd_bootdiag`'s live half — proves the pipe is alive over whichever
-/// transport is available, so macOS gets a working `bootdiag` too.
+/// `cmd_bootdiag`'s `--send` mode — proves the pipe is alive over whichever transport is
+/// available, so macOS gets a working liveness check too.
 ///
-/// UNVERIFIED: sends `KTM` and expects the `0x78` accept byte. The inline `cmd_bootdiag` only
-/// read the pipe without sending; sending a handshake is a better liveness test but **does
-/// advance the one-shot state machine**, so it must stay out of any path that then expects a
-/// fresh bootloader. Flagged for review before adoption.
-// Remove this allow once `cmd_bootdiag` is migrated to call it (APPLY.md step 5).
-#[allow(dead_code)]
+/// UNVERIFIED against hardware: sends `KTM` and expects the `0x78` accept byte. This is a
+/// stronger liveness test than the default (non-advancing) `bootdiag`, but it **does advance the
+/// one-shot state machine** — callers must re-`unlock` before `flash-cdc` afterward. Wired in as
+/// an explicit opt-in (APPLY.md step 5's resolution: default stays non-advancing, `--send` opts
+/// into this).
 pub fn bootdiag_live(pref: Preference, port: Option<&str>) -> Result<(), String> {
     use proto::ktcdc::{ack, token};
 
