@@ -16,7 +16,8 @@ ktflash-*.journal.json
 *.rzdb
 ghidra_proj/
 
-# staging/ build outputs (staging is scratch; its artifacts are never committed)
-staging/macos-native/ktmac/.build/
-staging/macos-native/e1_hid_setreport
-staging/macos-native/e3_interface_seize
+# build outputs
+macos/native/e1_hid_setreport
+macos/native/e3_interface_seize
+macos/native/ktmac/.build/
+tools/vmatrix/vmatrix

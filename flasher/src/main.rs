@@ -819,9 +819,13 @@ USAGE:
   ktflash dump --addr 0xADDR --len N [--out f]
                       raw 0x08 word-read diagnostic — does NOT read flash / NOT a backup
   ktflash flash-cdc --image <fw.bin> [--flag 0|1] [--base 0xADDR]
-                    [--transport auto|serial|usb] [--port <dev>] [--execute --yes]
+                    [--transport auto|serial|usb] [--port <dev>]
+                    [--expect VID:PID] [--no-reprobe] [--reprobe-timeout SECS]
+                    [--execute --yes]
                       native CDC bootloader write; dry-run unless --execute.
                       --yes required to write: save a known-good image first (no read-back).
+                      After RESET it reprobes the bus and journals the result; --expect
+                      halts on a device that comes back as something else.
   ktflash compat --template | --validate <matrix.json>
                       emit/validate a compatibility record    (no hardware)
   ktflash transcript --from-tshark <fields.txt> [--out t.json]

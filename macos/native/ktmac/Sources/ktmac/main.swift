@@ -41,7 +41,17 @@ let usage = """
       ktmac port                     print the bootloader's /dev/cu.* path only
       ktmac watch [--timeout N]      wait for the 8888:cdc0 bootloader
       ktmac unlock [options]         attempt the HID unlock
+      ktmac doctor                   check everything the native flow needs
+      ktmac flow --image fw.bin      the whole native flash, no OrbStack
       ktmac selftest                 hardware-free checks (no dongle needed)
+
+    FLOW OPTIONS:
+      --image PATH        firmware image (required)
+      --execute           actually unlock and write (default is a dry run)
+      --yes               skip the interactive FLASH confirmation
+      --expect VID:PID    require this identity after the reset, e.g. 2972:0102
+      --seize             use kIOHIDOptionsTypeSeizeDevice for the unlock
+      --no-id-prefix      omit the repeated report ID from the unlock buffer
 
     UNLOCK OPTIONS:
       --send              actually send (default is a dry run that sends nothing)
@@ -210,6 +220,66 @@ case "unlock":
               cd .. && make e3 && sudo ./e3_interface_seize --send   (experiment E3)
             """)
         exit(1)
+    } catch {
+        die("\(error)")
+    }
+
+case "doctor":
+    // Everything the native flow depends on, checked before anything is touched.
+    let pre = Doctor.run()
+    for c in pre.checks {
+        let mark = c.status == .ok ? "\u{001B}[32m✓\u{001B}[0m"
+            : (c.status == .warn ? "\u{001B}[33m!\u{001B}[0m" : "\u{001B}[31m✗\u{001B}[0m")
+        print("\(mark) \(c.name): \(c.detail)")
+        if let r = c.remedy, c.status != .ok { print("    → \(r)") }
+    }
+    print("")
+    // Report both gates: planning is useful on a machine with no dongle attached.
+    if pre.canProceed(executing: false) {
+        print("Dry runs work here:  ktmac flow --image fw.bin")
+    } else {
+        print("Not even dry runs work — fix the ✗ items above.")
+        exit(1)
+    }
+    if pre.canProceed(executing: true) {
+        print("Ready to flash:      ktmac flow --image fw.bin --execute")
+    } else {
+        let names = pre.blockers(executing: true).map(\.name).joined(separator: ", ")
+        print("Not ready to flash — still blocked on: \(names)")
+    }
+
+case "flow":
+    guard let image = option("--image") else {
+        die("flow needs --image <fw.bin>\n\n\(usage)")
+    }
+    let execute = flag("--execute")
+    let assumeYes = flag("--yes")
+    let seize = flag("--seize")
+    let noPrefix = flag("--no-id-prefix")
+    let expect = option("--expect")
+
+    let opts = FlowOptions(
+        imagePath: image,
+        expect: expect,
+        dryRunOnly: !execute,
+        assumeYes: assumeYes,
+        unlockMethod: seize ? .hidSeize : .hid,
+        includeIDPrefix: !noPrefix)
+
+    do {
+        _ = try Flow.run(
+            opts,
+            log: { print($0) },
+            confirm: { prompt in
+                // Read from the terminal, not from a pipe: a confirmation that can be
+                // satisfied by stdin redirection is not a confirmation.
+                guard isatty(FileHandle.standardInput.fileDescriptor) == 1 else {
+                    print("\(prompt)(stdin is not a terminal — pass --yes to skip this prompt)")
+                    return false
+                }
+                print(prompt, terminator: "")
+                return readLine()?.trimmingCharacters(in: .whitespaces) == "FLASH"
+            })
     } catch {
         die("\(error)")
     }

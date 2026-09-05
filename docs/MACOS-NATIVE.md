@@ -1,11 +1,12 @@
 # Plan — native macOS, without OrbStack
 
-**Status:** ✅ **proven end-to-end on real hardware, 2026‑09‑05** — every milestone through N4
-passed (see §5); N5 was never needed. `ktmac unlock --send` (Swift, `IOHIDManager`) plus
-`ktflash flash-cdc --transport serial` (Rust, over the CDC‑ACM tty) did a complete flash on a
-Mac with **zero OrbStack involvement** — device re‑enumerated as a working JA11 with an
-unchanged descriptor SHA‑256. **Open item:** the native unlock lives in the separate `ktmac`
-companion tool, not yet ported into `ktflash` itself — see §8 (new).
+**Status:** ✅ **proven end-to-end on real hardware, 2026‑09‑05** — every milestone including N6
+passed (see §5). Both the manual two-step (`ktmac unlock --send` then `ktflash flash-cdc
+--transport serial`) and the unified orchestrator (`ktmac flow --image fw.bin --execute`) did a
+complete flash on a Mac with **zero OrbStack involvement**, including the post-reset reprobe
+confirming success — device re‑enumerated as a working JA11 with an unchanged descriptor
+SHA‑256. **Open item:** it's still two binaries under the hood (`ktmac` orchestrates, `ktflash`
+does the write) — see §8.
 **Companion to:** [`RELEASE-PLAN.md`](RELEASE-PLAN.md) (M8)
 **Goal:** `ktflash unlock` and `ktflash flash-cdc` run on stock macOS with no OrbStack, no
 container, no VM, no kext, and — critically — **no Apple entitlement that would require a paid
@@ -107,6 +108,19 @@ existing udev rules already cover the tty
 (`packaging/99-ktflash.rules`, the `SUBSYSTEM=="tty"` line). So Stage B needs no privilege
 escalation on either OS.
 
+### 3.3b Resolving the port: solved, in Swift
+
+Matching a `/dev/cu.*` node back to its USB device is the one piece the Rust side cannot yet do
+properly. On Linux it is exact via sysfs (`/sys/class/tty/ttyACM0/device/../idVendor`); on macOS
+`serialtransport.rs` falls back to "accept any `/dev/cu.usbmodem*`", which is not good enough —
+a wrong guess aims a firmware write at the wrong device.
+
+[`macos/native/ktmac`](../macos/native/ktmac/Sources/KTMacKit/SerialPortFinder.swift) does it
+correctly: enumerate `IOSerialBSDClient` services, read `kIOCalloutDeviceKey` for the path, then
+`IORegistryEntrySearchCFProperty` with `kIORegistryIterateParents` to pull `idVendor`/`idProduct`
+down from the owning `IOUSBHostDevice` several levels up the IOService plane. Either port that
+into Rust or shell out to `ktmac port`.
+
 ### 3.4 Bonus: this improves Linux too
 
 The serial transport sidesteps `cdc_acm` detachment, the interface claim, **and** the
@@ -140,7 +154,7 @@ this is experiment E1 and it costs almost nothing.**
 
 ### 4.0b Already found: TCC gates E1/E2 before USB is even reached
 
-Running the E1 probe (`staging/macos-native/e1_hid_setreport.c`) on macOS 15 with **no device
+Running the E1 probe (`macos/native/e1_hid_setreport.c`) on macOS 15 with **no device
 attached** returns `0xe00002e2` = `kIOReturnNotPermitted` from `IOHIDManagerOpen` — before any
 USB device is touched.
 
@@ -198,14 +212,17 @@ Be honest about the outcome rather than forcing it:
 | **N3** | Prove `bootdiag` then `flash-cdc` over the tty on macOS | ✅ yes | ✅ **done, 2026‑09‑05** — full write, 67/67 packets |
 | **N4** | E1/E2 — native HID `unlock` via `IOHIDManager`; settles §4.0 either way | ✅ yes | ✅ **done, 2026‑09‑05** — E1 alone was sufficient |
 | **N5** | E3 — `USBInterfaceOpenSeize` fallback, only if N4 fails | ✅ yes | ➖ not needed (N4 passed) |
-| **N6** | Auto transport selection; docs rewritten; `orbstack/` demoted to a fallback appendix | — | 🚧 docs rewritten this pass; `ktmac`→`ktflash` merge still open (§8) |
+| **N6** | Auto transport selection; docs rewritten; `orbstack/` demoted to a fallback appendix | — | ✅ done — docs rewritten, `ktmac flow` proven on hardware (§8); single-binary merge still open |
 
 **N1 and N2 need no dongle** — they are ordinary refactoring against an existing trait with
 existing fixtures, and they are on the critical path. Start there.
 
-> **Draft code for N1, N2, N4 and N5 exists in [`staging/`](../staging/)** — the driver
-> refactor, the serial transport, and the two IOKit probes. The Rust is clippy-clean and
-> unit-tested; none of it has touched hardware. See [`staging/APPLY.md`](../staging/APPLY.md).
+> **N1-N6 have all landed and been proven on real hardware, 2026‑09‑05.** N1-N3 live in
+> `flasher/src/` (driver refactor, serial transport, journal, post-reset reprobe). N4/N5 live in
+> [`macos/native/`](../macos/native/) — the `ktmac` Swift package (including the `flow`/`doctor`
+> orchestration) plus the two C probes. A full `ktmac flow --execute` run completed end-to-end
+> against a real dongle: unlock, flash, and the post-reset reprobe all confirmed. The remaining
+> open item is purely the single-binary merge (§8) — nothing here is still hypothetical.
 
 N0 is the single cheapest high-information step in this document: if `/dev/cu.usbmodem*` does not
 appear, the whole Stage B design needs rethinking, and we'd rather know in ten minutes.
@@ -238,11 +255,19 @@ stays as the known-good fallback).
 
 ## 8. Open item — `ktmac`'s unlock is not yet in `ktflash`
 
-The proven pipeline today is **two binaries**: `ktmac unlock --send` (Swift) triggers the
-bootloader, then `ktflash flash-cdc --transport serial` (Rust) does the actual write. That's a
-real, complete, OrbStack‑free flow — but it's not what a user typing `ktflash unlock` on macOS
-gets today; that command still goes through `rusb` and fails exactly as `PROTOCOL.md` used to
-(correctly) describe for the *libusb* path.
+**Update, same day:** the two-binary flow now has a proper orchestrator — `ktmac flow --image
+fw.bin --execute` (Swift, [`Flow.swift`](../macos/native/ktmac/Sources/KTMacKit/Flow.swift))
+does preflight → dry run → typed `FLASH` confirmation → native unlock → resolve the bootloader's
+`/dev/cu.*` → shell out to `ktflash flash-cdc --transport serial` → `ktflash`'s own post-reset
+reprobe. **Confirmed on real hardware**: a full run completed end-to-end and the reprobe printed
+`Flash confirmed`. It still shells out to `ktflash` rather than reimplementing the protocol —
+"one implementation of the thing that erases firmware, not two" — so the *single-binary* gap
+below is still real, but the *user experience* gap (two commands, two mental models) is closed:
+`ktmac doctor` for readiness, `ktmac flow` for everything else.
+
+What's still open is the single-binary question: `ktflash unlock` (typed directly, on macOS,
+without `ktmac`) still goes through `rusb` and fails exactly as `PROTOCOL.md` used to (correctly)
+describe for the *libusb* path.
 
 Two ways to close this, neither started:
 

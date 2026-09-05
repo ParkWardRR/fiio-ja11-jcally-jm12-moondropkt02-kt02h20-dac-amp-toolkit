@@ -1,166 +1,168 @@
-# HANDOFF — staging/
+# HANDOFF — what has landed, what is left
 
-**To:** the agent picking this up · **From:** a no-hardware session, 2026-09-05
-**Read order:** this file → [`README.md`](README.md) (what was verified) → [`APPLY.md`](APPLY.md) (integration steps)
-
----
-
-## The one-paragraph version
-
-Three plans were written ([`RELEASE-PLAN`](../docs/RELEASE-PLAN.md),
-[`LINUX-TESTING`](../docs/LINUX-TESTING.md), [`MACOS-NATIVE`](../docs/MACOS-NATIVE.md)) and then
-implemented as far as a machine with **no dongle** can take them. Rust, Swift, Go and C all
-build and their checks pass. **Nothing has touched hardware.** Your job is to test it, fix what
-is wrong, integrate what survives, and delete this directory.
+**Updated:** 2026-09-05 (session 2) · **From:** a no-hardware session
+**Read order:** this file → [`APPLY.md`](APPLY.md) (what still needs integrating) → [`README.md`](README.md)
 
 ---
 
-## What you are inheriting
+## Where things stand
 
-| Language | Where | What | Verified |
-|---|---|---|---|
-| **Rust** | `flasher-src/` | flash-cdc state machine lifted onto a trait, serial transport, transport selection, **operation journaling**, rewired command | `clippy -D warnings` clean, **93 tests pass** |
-| **Swift** | `macos-native/ktmac/` | IOKit: USB enumeration, serial-port→USB resolution, HID unlock (E1/E2), self-tests | `swift build` clean, **13/13 selftest checks pass**, subcommands run |
-| **Go** | `tools/vmatrix/` | SSH runner for the Linux VM matrix + report generator | `go vet`/`gofmt` clean, runs end-to-end against unreachable hosts |
-| **C** | `macos-native/` | E3 `USBInterfaceOpenSeize` probe | compiles `-Wall -Wextra` clean, runs |
-| **Shell** | `release/`, `linux-testing/` | release, install, host-facts, P0, P2 scripts | `bash -n` / `sh -n` only — **never executed** |
+Three plans ([`RELEASE-PLAN`](../docs/RELEASE-PLAN.md), [`LINUX-TESTING`](../docs/LINUX-TESTING.md),
+[`MACOS-NATIVE`](../docs/MACOS-NATIVE.md)) were written and implemented as far as a machine with
+**no dongle** can take them. Two thirds of it has now graduated out of `staging/` into the real
+tree. **Nothing has touched hardware.**
 
-Language choice was driven by fit, not preference: Swift because IOKit from Swift is far less
-painful than the C plug-in dance (the one exception, E3's `IOUSBLib`, stayed in C precisely
-because it was already working); Go because a concurrent SSH fan-out with a markdown reporter
-is miserable in bash; Rust because that is what the tool is.
+| | Where it lives now | State |
+|---|---|---|
+| **Rust** — driver refactor, serial transport, journal, **post-reset reprobe** | `flasher/src/` | ✅ integrated · clippy clean · **102 tests** |
+| **Swift** — `ktmac`: IOKit, unlock experiments, **the whole native flow** | `macos/native/ktmac/` | ✅ graduated · builds · **20 selftest checks** |
+| **C** — E3 `USBInterfaceOpenSeize` probe | `macos/native/` | ✅ graduated · compiles `-Wall -Wextra` |
+| **Go** — `vmatrix` SSH test-matrix runner | `tools/vmatrix/` | ✅ graduated · `go vet`/`gofmt` clean |
+| **Shell** — release, install, host-facts, P0/P2 | `staging/release/`, `staging/linux-testing/` | ⏳ **still in staging**, never executed |
+| **Packaging** — udev rules, deb postinst, Cargo metadata | `staging/packaging/`, `staging/release/` | ⏳ **still in staging**, never built |
+
+`staging/flasher-src/` was deleted once its contents landed: two copies of the code that erases
+firmware is exactly the situation the ground rules were meant to prevent.
 
 ---
 
-## Two findings you should know before you start
+## What changed this session
 
-### 1. macOS TCC blocks the HID unlock experiment before USB is even reached
+### 1. ROADMAP Phase 3.4 is closed (in code)
 
-Running the E1 probe with **no device attached** returns `0xe00002e2` = `kIOReturnNotPermitted`
-from `IOHIDManagerOpen`. That is macOS TCC, not USB: since 10.15, opening an `IOHIDManager`
-needs **Input Monitoring** consent for the calling app — for a CLI, the terminal.
+The item read: *"⏳ Still to harden: journal each stage before its destructive command and
+confirm success by a post-reset reprobe."*
+
+- **Journal before the destructive command** — [`proto/ktcdc_journal.rs`](../flasher/src/proto/ktcdc_journal.rs).
+  `Erased` is recorded **before `KSTA` goes on the wire**: KSTA triggers the erase, so the flash
+  is gone whether or not we live to see the ACK. Journalling on the success edge would tell a
+  crashed operator that nothing destructive happened.
+- **Post-reset reprobe** — [`proto/postflash.rs`](../flasher/src/proto/postflash.rs), new this
+  session. `flash-cdc` now polls the bus after `RESET` and records `Confirmed` or
+  `IdentityMismatch`, so `ktflash recover` can finally say *done*. New flags:
+  `--expect VID:PID`, `--no-reprobe`, `--reprobe-timeout`.
+
+  Two deliberately conservative rules, both unit-tested:
+  - **An ISP-mode device anywhere on the bus is never a success.** Even if some other runtime
+    dongle is present. Claiming success while a device sits in the bootloader tells the operator
+    to walk away from something that still needs reflashing.
+  - **A mismatch is only reported against an explicit `--expect`.** `IdentityMismatch` is a halt
+    state; inferring the expected VID:PID and then halting on it would manufacture alarm from a
+    guess.
+
+### 2. `ktmac flow` — the macOS path with no OrbStack
+
+`orbstack/ktflash-orbstack.sh flash` creates an Ubuntu guest, installs build deps, passes the
+dongle through, builds ktflash in the guest, unlocks, re-attaches the device because it
+re-enumerated, and flashes over libusb. Every step of that exists to work around one thing:
+macOS refusing to let libusb claim the HID interface.
+
+`ktmac flow --image fw.bin` does it natively:
 
 ```
-System Settings > Privacy & Security > Input Monitoring > +   (add Terminal/iTerm)
+preflight → dry run → confirm → unlock (IOHIDManager) → resolve /dev/cu.* → ktflash flash-cdc
+  --transport serial --port … --execute --yes → ktflash's own post-reset reprobe
 ```
 
-Consequences: E1/E2 cannot be evaluated at all until this is granted (a "no devices found"
-result beforehand means nothing), and if ktflash ships an `IOHIDManager`-based unlock, this
-consent prompt becomes part of the macOS first-run experience. E3 goes via `IOUSBLib` and
-probably avoids it, trading a consent prompt for a `sudo` requirement.
+It **shells out to the Rust `ktflash`** for the write rather than reimplementing the protocol:
+the framing, journal and safety gates all live there, and a second implementation of the thing
+that erases firmware is the last thing this project needs. It prints the exact command it runs.
 
-Both `ktmac` and the C probe detect this and print the fix rather than a hex code.
+Also new: `ktmac doctor`, which checks everything the flow needs and reports the dry-run and
+execute gates separately.
 
-### 2. `flash-cdc` was writing flash with no recovery record at all
+### 3. A design flaw I introduced and then fixed
 
-ROADMAP Appendix A says *"destructive writes ship **only** with recovery semantics."* That held
-for `flash --apply`, which journals as it goes. It did **not** hold for `flash-cdc` — the path
-that is proven on hardware and that the README tells users to run. An interrupted `flash-cdc`
-left `ktflash recover` nothing to read.
+The first version of `flow` required TCC consent and an attached dongle before it would do
+anything — including the **dry run**, which only reads a file and prints a packet plan. That
+blocked the exact inspect-before-you-commit workflow the dry run exists for. Preflight checks
+now carry a `requiredFor: .always | .execute`, and a dry run needs only `ktflash` itself.
 
-`proto/ktcdc_journal.rs` fixes it, with the ordering discipline the journal API asks for:
-`Erased` is recorded **before `KSTA` goes on the wire**, because KSTA triggers the erase and the
-flash is gone whether or not we live to see the ACK. There is a test named after exactly that
-(`ksta_being_sent_is_enough_to_mark_the_flash_erased`).
+---
 
-This is the change I would most want a second pair of eyes on.
+## Still to do
+
+**No hardware needed:**
+
+1. **[`APPLY.md`](APPLY.md) step 7** — packaging and release scripts into `packaging/` and
+   `scripts/`, plus the `[package.metadata.deb]` / `[generate-rpm]` blocks. None of it has been
+   built; `cargo-deb` and `cargo-generate-rpm` were never run.
+2. Run the shell scripts through `shellcheck` (not available on the authoring machine) and
+   actually execute `./scripts/release.sh --dry-run`.
+3. `brew install zig && cargo install cargo-zigbuild`, then verify the one unproven link:
+   that zigbuild can compile vendored libusb's C sources.
+
+**Needs a Mac + dongle — in this order:**
+
+4. `ktmac list`, then after an OrbStack unlock, `ktmac port`. **This single check validates the
+   whole macOS-native premise**: if `8888:cdc0` does not publish a `/dev/cu.usbmodem*` node,
+   Stage B needs rethinking before any more code is written. Ten minutes.
+5. Grant Input Monitoring, then `ktmac unlock --send`. Then `--no-id-prefix`, then `--seize`,
+   then the C E3 probe. Pass = the dongle re-enumerates as `8888:cdc0`.
+6. `ktmac flow --image fw.bin` (dry run first, then `--execute`).
+7. **Whatever the unlock result, fix the docs.** `PROTOCOL.md` and `dongle-investigation.md`
+   contradict each other about macOS `SetReport`; E1 settles it and one of them is wrong.
+
+**Needs the Linux VMs:**
+
+8. `cd tools/vmatrix && go build && ./vmatrix init`, fill in SSH targets, `./vmatrix run`.
+9. **Configure USB passthrough by bus/port, not VID:PID, before anything else.** `unlock`
+   re-enumerates the dongle under a new ID, so an ID-keyed hypervisor rule drops it at exactly
+   the moment it matters — `unlock` looks like it succeeded and the bootloader never appears.
+10. P2 and P3 by hand. `vmatrix` refuses to automate them: they change device state and destroy
+    firmware, and must not happen because someone typed a command that looked like it ran tests.
 
 ---
 
 ## Where the risk actually is
 
-Ranked. Everything below is untested against hardware; this is about which parts will bite.
+Ranked. Everything is untested against hardware; this is about which parts will bite.
 
-1. **`serialtransport.rs` macOS port matching** — falls back to "any `/dev/cu.usbmodem*`" and
-   refuses when there are several. **`ktmac`'s `SerialPortFinder.swift` is the correct
-   implementation** (`IORegistryEntrySearchCFProperty` with `kIORegistryIterateParents`) and is
-   meant to be ported into Rust, or shelled out to via `ktmac port`. Do not ship the fallback:
-   guessing wrong aims a firmware write at the wrong device.
-2. **termios binary safety** — the protocol contains `0x11`/`0x13` (XON/XOFF) and `0x0d`/`0x0a`.
+1. **`serialtransport.rs` macOS port matching** falls back to "any `/dev/cu.usbmodem*`".
+   **`ktmac`'s [`SerialPortFinder.swift`](../macos/native/ktmac/Sources/KTMacKit/SerialPortFinder.swift)
+   is the correct implementation** (`IORegistryEntrySearchCFProperty` +
+   `kIORegistryIterateParents`). Port it into Rust, or shell out to `ktmac port`. Do not ship the
+   fallback — guessing wrong aims a firmware write at the wrong device.
+2. **termios binary safety.** The protocol contains `0x11`/`0x13` (XON/XOFF) and `0x0d`/`0x0a`.
    `cfmakeraw` plus explicit `IXON`/`ICRNL`/`OPOST` clears are in there, but this is exactly the
-   kind of thing that silently corrupts one byte in a firmware image.
+   kind of thing that silently corrupts one byte of a firmware image.
 3. **The `tio::` ioctl constants** are hard-coded (`TIOCMBIS` = `0x5416` Linux, `0x8004746c`
    macOS) rather than taken from `libc`. Check them against your headers.
-4. **`cargo-zigbuild` + vendored libusb** — the one unproven link in the release plan
-   (§3.2). If it can't compile libusb's C, build natively on the VMs instead; that fallback is
-   already wired into `release.sh` via `KT_SKIP_LINUX=1`.
-5. **`bootdiag_live()`** in `cmd_flash_cdc.rs` is `#[allow(dead_code)]` and **not** a drop-in
-   replacement — it *sends* `KTM`, which advances the one-shot state machine. Read APPLY.md
-   step 5 before wiring it.
-6. **Every shell script is unexecuted.** `shellcheck` was not available on the authoring machine.
+4. **The reprobe's runtime-device pick** takes the *first* non-bootloader dongle `scan()`
+   returns. With two dongles attached that could be the wrong one. `--expect` catches it; think
+   about whether it should be required when more than one device is present.
+5. **`cargo-zigbuild` + vendored libusb** — the unproven link in the release plan §3.2.
+6. **`bootdiag_live()`** in `cmd_flash_cdc.rs` is `#[allow(dead_code)]` and **not** a drop-in
+   replacement — it *sends* `KTM`, which advances the one-shot state machine.
+7. **Every shell script is unexecuted**, and shellcheck was unavailable.
 
 ---
 
-## Suggested order of work
+## Decisions you may want to reverse
 
-**No hardware needed (do these first):**
-
-1. APPLY.md steps 1–4 — the Rust integration. Rehearsed end-to-end; expect clippy clean and
-   93 tests. **Diff `ktcdc_driver.rs` against the original `main.rs:907-995` before trusting
-   it** — it is meant to be behaviourally identical, and any difference is my bug.
-2. `swift build && .build/debug/ktmac selftest` in `macos-native/ktmac/`.
-3. `go build && ./vmatrix init` in `tools/vmatrix/`.
-4. Run the shell scripts through `shellcheck` and actually execute `release.sh --dry-run`.
-
-**Needs a Mac + dongle:**
-
-5. `ktmac list`, `ktmac ports` — confirm the dongle enumerates and, after an OrbStack unlock,
-   that `ktmac port` resolves `8888:cdc0` to a `/dev/cu.*` path. **This single check validates
-   the whole macOS-native premise** (`MACOS-NATIVE.md` §5, N0). If no `cu.usbmodem*` appears for
-   the bootloader, stop and rethink Stage B before writing more code.
-6. `ktmac unlock --send` (after granting Input Monitoring). Then `--no-id-prefix`, then
-   `--seize`, then the C E3 probe. Pass = the dongle re-enumerates as `8888:cdc0`.
-7. Whatever the answer, **fix the docs**: `PROTOCOL.md` and `dongle-investigation.md`
-   currently contradict each other about macOS `SetReport`, and E1 settles it.
-
-**Needs the Linux VMs:**
-
-8. `vmatrix init`, fill in the SSH targets, `vmatrix run -dist ...`.
-9. **Before anything else, configure USB passthrough by bus/port, not VID:PID.** `unlock`
-   re-enumerates the dongle under a new ID, so an ID-keyed hypervisor rule drops it at exactly
-   the moment it matters — `unlock` looks like it succeeded and the bootloader never appears.
-10. P2 and P3 by hand. `vmatrix` deliberately refuses to automate them.
-
----
-
-## Decisions I made that you may want to reverse
-
-| Decision | Why | How to reverse |
+| Decision | Why | How |
 |---|---|---|
-| Serial preferred over libusb by default | only thing that works on macOS; avoids `cdc_acm`, the interface claim and the ModemManager race on Linux | one line: `Preference::default()` in `boottransport.rs` |
+| Serial preferred over libusb by default | the only thing that works on macOS; on Linux it avoids `cdc_acm`, the interface claim and the ModemManager race | `Preference::default()` in `boottransport.rs` |
+| `ktmac` shells out to `ktflash` for the write | one implementation of the protocol, not two | — |
+| Reprobe leaves the journal at `reset-issued` on `NoDevice`/`StillInBootloader` rather than `Failed` | the write itself completed; the honest state is "reset issued, outcome unknown" | `cmd_flash_cdc.rs` |
 | No containers anywhere | a static musl binary has no dependencies, and `unlock`'s re-enumeration makes `--device` passthrough actively wrong | — |
-| `libc` direct instead of the `serialport` crate | already transitive, MIT/Apache, no new `cargo deny` question | — |
-| No Swift test target | neither XCTest nor swift-testing exists with CLT-only; checks live in `ktmac selftest` so they actually run | add Xcode, port mechanically |
-| Go shells out to `ssh` rather than using `x/crypto/ssh` | inherits the operator's SSH config/agent/jump hosts; zero third-party crypto | — |
-| Journal writes every 16 packets | a file write per KB would slow the flash and add failure modes to the recovery mechanism | `JOURNAL_EVERY_PACKETS` |
-| `Confirmed` is never recorded by the driver | it means "post-reset reprobe saw the expected identity", which the driver cannot observe | — |
+| No Swift test target | neither XCTest nor swift-testing ships with CLT-only; checks live in `ktmac selftest` so they actually run | add Xcode, port mechanically |
+| Go shells out to `ssh` rather than `x/crypto/ssh` | inherits the operator's SSH config, agent and jump hosts; zero third-party crypto | — |
 
 ---
 
-## What I could not do, and what it would take
+## Not done, and why
 
 | Blocked on | Item |
 |---|---|
 | A dongle | every I/O path in every language |
-| A Mac with the dongle | N0 (does `8888:cdc0` publish a `/dev/cu.*`?) — ten minutes, highest information per minute in this whole handoff |
-| Linux VMs | the entire test matrix |
-| `zig` + `cargo-zigbuild` | cross-compiling; not installed here |
-| `cargo-deb` / `cargo-generate-rpm` | the packaging metadata is written but unvalidated |
-| `shellcheck` | shell lint |
+| A Mac with the dongle | the N0 check above — highest information per minute in this document |
+| Linux VMs | the whole test matrix |
+| `zig`, `cargo-deb`, `cargo-generate-rpm`, `shellcheck` | cross-compiling, packaging, shell lint |
 | Xcode.app | a real Swift test target |
-| An Apple Developer account ($99/yr) | notarization — deferred by design, blocks nothing else |
+| An Apple Developer account | notarization — deferred by design, blocks nothing else |
+| **Your decision** | 10 commits in git history carry a personal email as the author address. Removing it needs `git filter-repo` + a force-push to `main`, which would break every existing clone including the hardware agent's. Not done unilaterally — see the note at the end of the session summary. |
 
----
-
-## Ground rules kept throughout
-
-- Destructive gates untouched: `--execute` + `--yes` still required, dry run still the default,
-  no default container `CMD`, `vmatrix` refuses to automate P2/P3.
-- No firmware images anywhere.
-- `proto/` stays free of `rusb` and OS I/O — `ktcdc_driver.rs` and `ktcdc_journal.rs` respect it.
-- New dependencies: exactly one (`libc`, already transitive). Swift and Go packages are
-  dependency-free.
-- Honest labels: nothing claims to work on hardware, because nothing has been tried on hardware.
-
-Delete `staging/` once its contents live in `flasher/src/`, `scripts/`, `packaging/` and
-`tools/`. It is a scratchpad, not a second source of truth.
+Ground rules kept throughout: destructive gates untouched (`--execute` + `--yes`, dry run by
+default, `vmatrix` refuses P2/P3), no firmware images, `proto/` stays free of `rusb` and OS I/O,
+and exactly one new dependency across the whole thing (`libc`, already transitive).

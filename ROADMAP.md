@@ -94,8 +94,21 @@ the vendor tool (Ghidra) — no USB capture needed in the end. Full writeup:
    from a Mac + OrbStack; the device re‑enumerated to `2972:0102` as a working JA11.
 3. ✅ **Safety**: refuses to write without `--yes`, prints a loud back‑up‑first warning, and
    auto‑derives `flag` from the image so you can't pick the wrong write base by hand.
-4. ⏳ **Still to harden**: journal each stage before its destructive command and confirm success
-   by a post‑reset reprobe (the `Journal` model exists; wire it into `flash-cdc`).
+4. ✅ **Hardened, hardware‑confirmed 2026‑09‑05:**
+   - **Journal before the destructive command.** [`proto/ktcdc_journal.rs`](flasher/src/proto/ktcdc_journal.rs)
+     drives a `Journal` from the writer's events, recording `Erased` **before `KSTA` goes on the
+     wire** — once KSTA is sent the flash is gone whether or not we live to see the ACK, so
+     journalling on the success edge would tell a crashed operator that nothing destructive
+     happened.
+   - **Post‑reset reprobe.** [`proto/postflash.rs`](flasher/src/proto/postflash.rs) polls the bus
+     after `RESET` and records `Confirmed` / `IdentityMismatch`, so `ktflash recover` can finally
+     say *done*. Conservative by design: an ISP‑mode device anywhere on the bus is never a
+     success, and a mismatch is only ever reported against an explicit `--expect VID:PID`
+     (`IdentityMismatch` is a halt state — inferring the expectation would manufacture alarm
+     from a guess). **Confirmed on real hardware**: `flash-cdc --expect 2972:0102 --execute --yes`
+     printed `[reprobe] ✅ 2972:0102 — Flash confirmed`, and `ktflash recover` reported
+     `last recorded stage: Confirmed` / `safe next action: Done` — closing the loop this phase's
+     goal named.
 
 **Recovery reality:** the `KT_USB_BOOT` ROM survives an app‑flash, so a bad write can be redone
 by re‑unlocking and reflashing a compatible image — but **only if you have that image**. A botched
@@ -287,6 +300,8 @@ the raw record of what was confirmed, and the operational context for anyone pic
 | A repeated `KTM` after the handshake is already consumed gets **zero bytes back**, not garbage | `flash-cdc` on an already‑progressed bootloader → `KTM: expected [78], got [] after 800ms` — clean, safe, non‑destructive failure; journal recorded `Staged`→`Failed`, `safe_next_action: CancelOrBegin` |
 | **Native macOS `unlock` works** via `IOHIDManager` — the project's own long‑standing "macOS can't drive this" claim was wrong | `IOHIDDeviceSetReport` returns success and the device re‑enumerates as `8888:cdc0`, confirmed by `ioreg` and `/dev/cu.usbmodem101` appearing — `ktmac unlock --send`, 2026‑09‑05, no OrbStack |
 | A complete `flash-cdc` write works fully macOS‑native (serial transport, no OrbStack, no libusb) | 67/67 packets ACKed, erase, `STP`, `RESET` clean; device re‑enumerated with the same descriptor SHA‑256 as before — 2026‑09‑05, same session as the Linux‑native proof |
+| `ktmac flow` (the unified preflight→dry‑run→unlock→flash→reprobe orchestration, calling `ktflash` as a subprocess) works end‑to‑end on real hardware | Full run completed with `--execute --yes`; device came back as a working `2972:0102` JA11 — first hardware run of `Flow.swift`, previously "STATUS: UNTESTED against hardware" |
+| The post‑reset reprobe (`proto::postflash`, ROADMAP Phase 3.4) correctly detects success | `flash-cdc --expect 2972:0102 --execute --yes` printed `[reprobe] ✅ 2972:0102 — Flash confirmed`; `ktflash recover` then reported `Confirmed` / `Done` instead of the old ceiling of `ResetIssued` / `WaitAndReprobe` |
 
 ## Operational gotchas
 
