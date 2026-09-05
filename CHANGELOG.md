@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased] — Linux‑native flash proven on hardware — 2026‑09‑05
+
+### Added
+- **`ktflash bootdiag --send`** — an explicit, advancing liveness check (sends `KTM`, waits for
+  the `0x78` ACK) alongside the default non‑advancing `bootdiag`. Both now work over `--transport
+  auto|serial|usb`.
+- **`proto::ktcdc_driver` / `proto::ktcdc_journal`** — the flash-cdc state machine and its
+  operation journal, lifted out of `main.rs` onto the `Transport` trait so they're unit-tested
+  independent of `rusb` (93 tests total).
+- **`serialtransport.rs` / `boottransport.rs`** — a CDC-ACM tty transport (serial, preferred by
+  default) alongside the existing libusb path, so Linux (and eventually macOS-native) can drive
+  the bootloader without claiming a USB interface.
+
+### Proven on hardware
+- **Linux-native, no OrbStack**: a full `flash-cdc --execute --yes` write completed on a real
+  Debian 13 VM over the serial transport — 67/67 packets ACKed, device re-enumerated as a working
+  JA11 with an identical descriptor SHA-256 to before. First hardware run of the refactored
+  driver/journal code. Full narrative in `ROADMAP.md` Appendix D.
+- Confirmed `packaging/99-ktflash.rules`'s `uaccess`-only default is a no-op on headless Linux
+  (no logind seat) — `GROUP="plugdev"` is now uncommented by default.
+- Documented a hard AlmaLinux/RHEL limitation: `kernel-devel` ships no `vhci-hcd` driver source,
+  so RHEL-family guests can't be USB/IP clients at all (blocks this test rig, not `ktflash`).
+
 ## [1.1.1] — 2026‑09‑05
 
 ### Changed

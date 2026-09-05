@@ -1,17 +1,21 @@
 # ktflash — udev rules for KTMicro KT02H20 / FiiO JA11 dongles and their bootloader.
 #
-# Without these, claiming the USB interface on Linux needs root. Installing them grants the
-# logged-in user access (via systemd-logind `uaccess`), so `ktflash unlock` / `bootdiag` /
-# `flash` work without sudo — the roadmap M3 "Linux-native" path, no OrbStack layer.
+# Without these, claiming the USB interface on Linux needs root. Installing them grants
+# non-root access two ways at once — both are active by default, see why below.
 #
 # Install:
 #   sudo cp packaging/99-ktflash.rules /etc/udev/rules.d/
 #   sudo udevadm control --reload-rules && sudo udevadm trigger
-# Then replug the dongle. (The .deb/.rpm install this to /usr/lib/udev/rules.d for you.)
+# Then replug the dongle (or re-trigger is enough if it's already attached).
 #
-# `uaccess` is the modern approach (seat-local access). If your distro/setup doesn't honor it —
-# notably on HEADLESS machines, which have no logind seat — uncomment the GROUP/MODE lines and
-# add yourself to the `plugdev` group instead.
+# `uaccess` (systemd-logind seat-local access) is the modern desktop mechanism, but it is a
+# no-op with no logind seat — confirmed on a headless Debian 13 VM (SSH-only session,
+# `loginctl show-session ... -p Seat` prints empty): ktflash probe still needed sudo to read
+# manufacturer/product/serial strings with uaccess alone. GROUP="plugdev" is what actually
+# grants access there, and it's harmless to leave active on a desktop too (uaccess still wins
+# when a seat exists) — so both lines ship uncommented. You need to be in the `plugdev` group
+# for the GROUP line to help (most desktop distros add the first user to it automatically;
+# on a bare VM: `sudo usermod -aG plugdev $USER`, then log back in).
 #
 # NOTE ON VID 0x8888: that is a squatted/placeholder vendor ID, not one KTMicro owns. Every
 # 0x8888 rule below therefore keeps its `cdc0` product-ID qualifier — do not relax them to a
@@ -19,29 +23,30 @@
 
 # Stock KTMicro KT02H20 (and other 0x31b2 dongles) — normal mode
 SUBSYSTEM=="usb", ATTR{idVendor}=="31b2", TAG+="uaccess"
-#SUBSYSTEM=="usb", ATTR{idVendor}=="31b2", GROUP="plugdev", MODE="0660"
+SUBSYSTEM=="usb", ATTR{idVendor}=="31b2", GROUP="plugdev", MODE="0660"
 
 # FiiO / JadeAudio JA11 — already-flashed, normal mode
 SUBSYSTEM=="usb", ATTR{idVendor}=="2972", ATTR{idProduct}=="0102", TAG+="uaccess"
-#SUBSYSTEM=="usb", ATTR{idVendor}=="2972", ATTR{idProduct}=="0102", GROUP="plugdev", MODE="0660"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2972", ATTR{idProduct}=="0102", GROUP="plugdev", MODE="0660"
 
 # KT_USB_BOOT CDC bootloader (appears after `ktflash unlock`)
 SUBSYSTEM=="usb", ATTR{idVendor}=="8888", ATTR{idProduct}=="cdc0", TAG+="uaccess"
-#SUBSYSTEM=="usb", ATTR{idVendor}=="8888", ATTR{idProduct}=="cdc0", GROUP="plugdev", MODE="0660"
+SUBSYSTEM=="usb", ATTR{idVendor}=="8888", ATTR{idProduct}=="cdc0", GROUP="plugdev", MODE="0660"
 
-# The bootloader also exposes a CDC-ACM tty (/dev/ttyACM*). `ktflash --transport serial` drives
-# that tty directly, and the libusb path doesn't need it — either way, uaccess covers it:
+# The bootloader also exposes a CDC-ACM tty (/dev/ttyACM*) — the serial transport (macOS/Linux)
+# drives this; the libusb transport drives the bulk endpoints directly. Both need access:
 SUBSYSTEM=="tty", ATTRS{idVendor}=="8888", ATTRS{idProduct}=="cdc0", TAG+="uaccess"
-#SUBSYSTEM=="tty", ATTRS{idVendor}=="8888", ATTRS{idProduct}=="cdc0", GROUP="plugdev", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="8888", ATTRS{idProduct}=="cdc0", GROUP="plugdev", MODE="0660"
 
 # --- Keep ModemManager off the bootloader -------------------------------------------------
-# NEW (docs/RELEASE-PLAN.md §5.3). After `unlock` the device exposes a CDC-ACM tty, and on both
-# Debian and Alma, ModemManager opens new ttyACM* devices to probe for AT-capable modems. That
-# is a live race against ktflash for the same interface during a flash, and a plausible cause of
-# intermittent failures. ktflash already calls set_auto_detach_kernel_driver() so cdc_acm itself
-# is handled — ModemManager is a separate actor that nothing currently keeps out.
+# After `unlock` the device exposes a CDC-ACM tty, and on some distros ModemManager opens new
+# ttyACM* devices to probe for AT-capable modems — a live race against ktflash for the same
+# interface during a flash, and a plausible cause of intermittent failures. ktflash already
+# calls set_auto_detach_kernel_driver() so cdc_acm itself is handled; ModemManager is a separate
+# actor that nothing else here keeps out.
 #
-# UNVERIFIED: not yet confirmed that ModemManager actually probes THIS device. Test both ways
-# per docs/LINUX-TESTING.md P2 before deciding whether this ships as a fix or a comment.
+# STATUS: not exercised — the Debian 13 VM used for the 2026-09-05 hardware validation
+# (ROADMAP Appendix D) didn't have ModemManager installed at all, so this path is still
+# unconfirmed either way. Left in as a defensive default; harmless if ModemManager is absent.
 SUBSYSTEM=="usb", ATTR{idVendor}=="8888", ATTR{idProduct}=="cdc0", ENV{ID_MM_DEVICE_IGNORE}="1"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="8888", ATTRS{idProduct}=="cdc0", ENV{ID_MM_DEVICE_IGNORE}="1"
