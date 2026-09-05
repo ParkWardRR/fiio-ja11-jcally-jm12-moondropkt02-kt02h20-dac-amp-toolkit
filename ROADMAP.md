@@ -90,8 +90,18 @@ the vendor tool (Ghidra) — no USB capture needed in the end. Full writeup:
    from a Mac + OrbStack; the device re‑enumerated to `2972:0102` as a working JA11.
 3. ✅ **Safety**: refuses to write without `--yes`, prints a loud back‑up‑first warning, and
    auto‑derives `flag` from the image so you can't pick the wrong write base by hand.
-4. ⏳ **Still to harden**: journal each stage before its destructive command and confirm success
-   by a post‑reset reprobe (the `Journal` model exists; wire it into `flash-cdc`).
+4. ✅ **Hardened** (code in; ⏳ untested on hardware since the refactor):
+   - **Journal before the destructive command.** [`proto/ktcdc_journal.rs`](flasher/src/proto/ktcdc_journal.rs)
+     drives a `Journal` from the writer's events, recording `Erased` **before `KSTA` goes on the
+     wire** — once KSTA is sent the flash is gone whether or not we live to see the ACK, so
+     journalling on the success edge would tell a crashed operator that nothing destructive
+     happened.
+   - **Post‑reset reprobe.** [`proto/postflash.rs`](flasher/src/proto/postflash.rs) polls the bus
+     after `RESET` and records `Confirmed` / `IdentityMismatch`, so `ktflash recover` can finally
+     say *done*. Conservative by design: an ISP‑mode device anywhere on the bus is never a
+     success, and a mismatch is only ever reported against an explicit `--expect VID:PID`
+     (`IdentityMismatch` is a halt state — inferring the expectation would manufacture alarm
+     from a guess).
 
 **Recovery reality:** the `KT_USB_BOOT` ROM survives an app‑flash, so a bad write can be redone
 by re‑unlocking and reflashing a compatible image — but **only if you have that image**. A botched

@@ -101,6 +101,19 @@ existing udev rules already cover the tty
 (`packaging/99-ktflash.rules`, the `SUBSYSTEM=="tty"` line). So Stage B needs no privilege
 escalation on either OS.
 
+### 3.3b Resolving the port: solved, in Swift
+
+Matching a `/dev/cu.*` node back to its USB device is the one piece the Rust side cannot yet do
+properly. On Linux it is exact via sysfs (`/sys/class/tty/ttyACM0/device/../idVendor`); on macOS
+`serialtransport.rs` falls back to "accept any `/dev/cu.usbmodem*`", which is not good enough —
+a wrong guess aims a firmware write at the wrong device.
+
+[`macos/native/ktmac`](../macos/native/ktmac/Sources/KTMacKit/SerialPortFinder.swift) does it
+correctly: enumerate `IOSerialBSDClient` services, read `kIOCalloutDeviceKey` for the path, then
+`IORegistryEntrySearchCFProperty` with `kIORegistryIterateParents` to pull `idVendor`/`idProduct`
+down from the owning `IOUSBHostDevice` several levels up the IOService plane. Either port that
+into Rust or shell out to `ktmac port`.
+
 ### 3.4 Bonus: this improves Linux too
 
 The serial transport sidesteps `cdc_acm` detachment, the interface claim, **and** the
@@ -134,7 +147,7 @@ this is experiment E1 and it costs almost nothing.**
 
 ### 4.0b Already found: TCC gates E1/E2 before USB is even reached
 
-Running the E1 probe (`staging/macos-native/e1_hid_setreport.c`) on macOS 15 with **no device
+Running the E1 probe (`macos/native/e1_hid_setreport.c`) on macOS 15 with **no device
 attached** returns `0xe00002e2` = `kIOReturnNotPermitted` from `IOHIDManagerOpen` — before any
 USB device is touched.
 
@@ -197,9 +210,10 @@ Be honest about the outcome rather than forcing it:
 **N1 and N2 need no dongle** — they are ordinary refactoring against an existing trait with
 existing fixtures, and they are on the critical path. Start there.
 
-> **Draft code for N1, N2, N4 and N5 exists in [`staging/`](../staging/)** — the driver
-> refactor, the serial transport, and the two IOKit probes. The Rust is clippy-clean and
-> unit-tested; none of it has touched hardware. See [`staging/APPLY.md`](../staging/APPLY.md).
+> **N1-N3 have landed** in `flasher/src/` (driver refactor, serial transport, journal,
+> post-reset reprobe). **N4/N5 live in [`macos/native/`](../macos/native/)** — the `ktmac`
+> Swift package plus the two C probes. Everything builds and self-checks; none of it has
+> touched hardware.
 
 N0 is the single cheapest high-information step in this document: if `/dev/cu.usbmodem*` does not
 appear, the whole Stage B design needs rethinking, and we'd rather know in ten minutes.

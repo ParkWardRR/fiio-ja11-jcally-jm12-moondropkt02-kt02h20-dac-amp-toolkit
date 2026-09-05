@@ -32,6 +32,7 @@ pub mod ktcdc_driver;
 pub mod ktcdc_journal;
 pub mod manifest;
 pub mod plan;
+pub mod postflash;
 pub mod transcript;
 
 /// How well we actually *know* a given protocol fact.

@@ -1,19 +1,23 @@
-//! Replacement for `cmd_flash_cdc` in `flasher/src/main.rs`.
+//! `ktflash flash-cdc` — the native CDC bootloader write.
 //!
-//! This is **not a new module** — it is the body of the existing command, rewritten to:
+//! Split out of `main.rs`, where the state machine used to be inline and welded to `rusb`
+//! closures. The pieces now are:
 //!
-//! 1. drive [`crate::proto::ktcdc_driver::Driver`] instead of inline `rusb` closures, and
-//! 2. accept `--transport auto|serial|usb` and `--port <dev>` so macOS can flash over the CDC
-//!    tty (`docs/MACOS-NATIVE.md`).
+//! - [`crate::proto::ktcdc`] — byte-exact framing (decompiled, unit-tested).
+//! - [`crate::proto::ktcdc_driver`] — the sequencing, generic over
+//!   [`Transport`](crate::proto::cdc::Transport) so it is testable with no hardware.
+//! - [`crate::boottransport`] — serial (CDC tty) or libusb bulk. Serial is what lets macOS
+//!   flash without OrbStack (`docs/MACOS-NATIVE.md`).
+//! - [`crate::proto::ktcdc_journal`] — the operation journal, recorded *before* each
+//!   destructive command.
+//! - [`crate::proto::postflash`] — the post-reset reprobe that decides whether it worked.
 //!
-//! Paste the two functions below over the existing `cmd_flash_cdc` (`main.rs:837-996`). The
-//! dry-run output, the warning banner, the `--yes` gate, and the flag/base derivation are
-//! **unchanged** — only the hardware-driving half is different.
+//! Together those two last items are ROADMAP Phase 3.4: *"journal each stage before its
+//! destructive command and confirm success by a post-reset reprobe."*
 //!
-//! `open_bootloader()` (`main.rs:787`) becomes dead once `cmd_bootdiag` is migrated too; leave
-//! it until then.
-//!
-//! > **Status: untested.** Compiles against stubs; never run.
+//! > **Status: the write path has not been re-tested on hardware since the refactor.** The
+//! > sequence is transcribed from the version that was proven on 2026-09-05, and the logic is
+//! > unit-tested, but no dongle has been flashed through this code.
 
 use std::time::Duration;
 
@@ -26,6 +30,12 @@ use crate::proto::{self, image::KtHelios};
 /// How often to print a packet line during the write. The inline version printed every 8th
 /// packet plus the final one; the driver now reports every packet and we throttle here.
 const PROGRESS_EVERY: usize = 8;
+
+/// How long to wait for the dongle to come back after `RESET`.
+///
+/// Re-enumeration plus the host settling on a new address is usually a second or two; 20s is
+/// slack for a slow hub or a USB/IP hop without making a genuinely dead device hang the tool.
+const DEFAULT_REPROBE_SECS: u64 = 20;
 
 /// `ktflash flash-cdc --image <fw.bin> [--flag 0|1] [--base 0xADDR]
 ///                    [--transport auto|serial|usb] [--port <dev>] [--execute --yes]`
@@ -42,6 +52,9 @@ pub fn cmd_flash_cdc(args: &[String]) -> Result<(), String> {
     let (mut execute, mut acked) = (false, false);
     let mut transport_pref = Preference::default();
     let mut port: Option<String> = None;
+    let mut expected: Option<DeviceFingerprint> = None;
+    let mut reprobe = true;
+    let mut reprobe_secs = DEFAULT_REPROBE_SECS;
 
     let mut it = args.iter();
     while let Some(flag_arg) = it.next() {
@@ -61,6 +74,16 @@ pub fn cmd_flash_cdc(args: &[String]) -> Result<(), String> {
                     .parse::<Preference>()?
             }
             "--port" => port = Some(it.next().ok_or("--port needs a device path")?.clone()),
+            "--expect" => {
+                let s = it.next().ok_or("--expect needs VID:PID (e.g. 2972:0102)")?;
+                expected = Some(DeviceFingerprint::parse_short(s)?);
+            }
+            "--no-reprobe" => reprobe = false,
+            "--reprobe-timeout" => {
+                reprobe_secs = crate::parse_num(
+                    it.next().ok_or("--reprobe-timeout needs a number of seconds")?,
+                )?
+            }
             "--execute" => execute = true,
             "--yes" => acked = true,
             other => return Err(format!("unknown flag for flash-cdc: {other}")),
@@ -68,7 +91,10 @@ pub fn cmd_flash_cdc(args: &[String]) -> Result<(), String> {
     }
 
     let path = image_path.ok_or(
-        "usage: ktflash flash-cdc --image <fw.bin> [--flag 0|1] [--transport auto|serial|usb] [--port <dev>] [--execute --yes]",
+        "usage: ktflash flash-cdc --image <fw.bin> [--flag 0|1] [--base 0xADDR]\n\
+         \x20                    [--transport auto|serial|usb] [--port <dev>]\n\
+         \x20                    [--expect VID:PID] [--no-reprobe] [--reprobe-timeout SECS]\n\
+         \x20                    [--execute --yes]",
     )?;
     let image = std::fs::read(&path).map_err(|e| format!("read {path}: {e}"))?;
     if !proto::image::looks_like_kt_helios(&image) {
@@ -180,13 +206,82 @@ pub fn cmd_flash_cdc(args: &[String]) -> Result<(), String> {
         eprintln!("   recovery data may be incomplete — note where the flash got to manually.");
     }
 
-    println!("\nUPGRADE FIRMWARE SUCESS — device should re-enumerate to normal JA11 mode.");
+    println!("\nUPGRADE FIRMWARE SUCESS — device should re-enumerate to normal mode.");
+
+    // ---- post-reset reprobe (ROADMAP Phase 3.4) ----
+    // Without this the journal tops out at `reset-issued`, whose recovery action is
+    // "wait and reprobe" — so `ktflash recover` could never say *done*, and a flash that reset
+    // into a non-booting image looked exactly like one that worked.
+    if !reprobe {
+        println!("journal: {}", recorder.path().display());
+        println!(
+            "  --no-reprobe given, so the journal stays at `reset-issued`.\n  \
+             Confirm by hand with `ktflash probe`."
+        );
+        return Ok(());
+    }
+
+    println!("\n[reprobe] waiting up to {}s for the dongle to re-enumerate…", reprobe_secs);
+    let outcome = wait_for_reprobe(expected.as_ref(), Duration::from_secs(reprobe_secs));
+
+    match &outcome {
+        proto::postflash::ReprobeOutcome::Confirmed(fp) => {
+            recorder.confirm(outcome.journal_detail());
+            println!("[reprobe] ✅ {} — {}", fp.short(), outcome.advice());
+        }
+        proto::postflash::ReprobeOutcome::Mismatch { .. } => {
+            // A halt state: the recovery model deliberately refuses to auto-select another image.
+            recorder.identity_mismatch(outcome.journal_detail());
+            eprintln!("\n\x1b[1;31m[reprobe] {}\x1b[0m", outcome.journal_detail());
+            eprintln!("{}", outcome.advice());
+            eprintln!("journal: {}", recorder.path().display());
+            return Err(outcome.journal_detail());
+        }
+        _ => {
+            // Leave the journal at `reset-issued` (→ WaitAndReprobe) rather than recording a
+            // failure: the write itself completed, and the honest state is "reset issued,
+            // outcome unknown".
+            eprintln!("\n\x1b[1;33m[reprobe] {}\x1b[0m", outcome.journal_detail());
+            eprintln!("{}", outcome.advice());
+            eprintln!("journal: {}", recorder.path().display());
+            eprintln!("next safe step: ktflash recover {}", recorder.path().display());
+            return Err(outcome.journal_detail());
+        }
+    }
+
     println!("journal: {}", recorder.path().display());
-    println!(
-        "  Once the dongle re-enumerates in normal mode, confirm with `ktflash probe`.\n  \
-         The journal stays at `reset-issued` until a reprobe confirms the new identity."
-    );
     Ok(())
+}
+
+/// Poll the bus until the dongle settles, then apply [`proto::postflash::decide`].
+///
+/// Polls rather than returning on the first look: the device drops off the bus on RESET and the
+/// host takes a moment to re-enumerate it, so an immediate check reliably reports `NoDevice`.
+/// Returns early only on a verdict that cannot improve with more waiting.
+fn wait_for_reprobe(
+    expected: Option<&DeviceFingerprint>,
+    timeout: Duration,
+) -> proto::postflash::ReprobeOutcome {
+    use proto::postflash::{decide, ReprobeObservation};
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let devs = crate::scan();
+        let obs = ReprobeObservation {
+            bootloader_present: devs.iter().any(|d| matches!(d.mode, crate::Mode::Bootloader)),
+            runtime: devs
+                .iter()
+                .find(|d| !matches!(d.mode, crate::Mode::Bootloader))
+                .map(crate::fingerprint_from_dev),
+        };
+        let verdict = decide(&obs, expected);
+        // Confirmed and Mismatch are both stable answers; the other two may still resolve as
+        // the host finishes enumerating, so keep looking until the deadline.
+        if verdict.is_success() || verdict.is_halt() || std::time::Instant::now() >= deadline {
+            return verdict;
+        }
+        std::thread::sleep(Duration::from_millis(400));
+    }
 }
 
 /// Reproduces the inline version's output, including its every-8th-packet throttling.

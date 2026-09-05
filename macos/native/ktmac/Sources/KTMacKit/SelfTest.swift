@@ -115,6 +115,89 @@ public enum SelfTest {
             return nil
         }
 
+        log?("ktflash invocation")
+
+        check("a dry run never carries --execute or --yes") {
+            // The single most important assertion in this file: `flow` runs a dry run first,
+            // and if that invocation could ever write, the "nothing is touched" step would be
+            // a lie.
+            let dry = FlashCdcInvocation(imagePath: "/tmp/fw.bin")
+            let args = dry.arguments
+            guard !args.contains("--execute") else { return "dry run contained --execute" }
+            guard !args.contains("--yes") else { return "dry run contained --yes" }
+            guard args.first == "flash-cdc", args.contains("--image") else {
+                return "malformed argv: \(args)"
+            }
+            return nil
+        }
+
+        check("--yes only ever appears alongside --execute") {
+            // --yes is the "I have a known-good image saved" acknowledgement. It must never
+            // ride along on a command that was not already going to write.
+            let write = FlashCdcInvocation(imagePath: "/tmp/fw.bin", execute: true)
+            let args = write.arguments
+            guard args.contains("--execute"), args.contains("--yes") else {
+                return "an executing invocation is missing --execute/--yes"
+            }
+            guard let e = args.firstIndex(of: "--execute"), let y = args.firstIndex(of: "--yes"),
+                y == e + 1
+            else { return "--yes is not adjacent to --execute" }
+            return nil
+        }
+
+        check("a port implies the serial transport") {
+            let inv = FlashCdcInvocation(imagePath: "/tmp/fw.bin", port: "/dev/cu.usbmodem1101")
+            let args = inv.arguments
+            guard let t = args.firstIndex(of: "--transport"), args[t + 1] == "serial" else {
+                return "passing a port did not select the serial transport: \(args)"
+            }
+            guard let p = args.firstIndex(of: "--port"), args[p + 1] == "/dev/cu.usbmodem1101"
+            else { return "port not passed through: \(args)" }
+            return nil
+        }
+
+        check("--expect is passed through verbatim") {
+            let inv = FlashCdcInvocation(imagePath: "/tmp/fw.bin", expect: "2972:0102")
+            let args = inv.arguments
+            guard let i = args.firstIndex(of: "--expect"), args[i + 1] == "2972:0102" else {
+                return "expectation not passed through: \(args)"
+            }
+            return nil
+        }
+
+        check("the printed command line is the command actually run") {
+            // `flow` shows the operator what it ran; if the two diverged, the audit trail for a
+            // destructive operation would be wrong.
+            let inv = FlashCdcInvocation(
+                imagePath: "/tmp/my firmware.bin", port: "/dev/cu.usbmodem1101", execute: true)
+            let line = inv.commandLine(binary: "/usr/local/bin/ktflash")
+            for arg in inv.arguments where !arg.contains(" ") {
+                guard line.contains(arg) else { return "\(arg) missing from: \(line)" }
+            }
+            guard line.contains("'/tmp/my firmware.bin'") else {
+                return "a path with a space was not quoted: \(line)"
+            }
+            return nil
+        }
+
+        check("`which` finds a binary that exists and not one that does not") {
+            guard ProcessRunner.which("ls") != nil else { return "could not find ls" }
+            guard ProcessRunner.which("definitely-not-a-real-binary-xyz") == nil else {
+                return "found a binary that does not exist"
+            }
+            return nil
+        }
+
+        check("ProcessRunner captures output and exit codes") {
+            guard let r = try? ProcessRunner.run("/bin/echo", ["hello"]) else {
+                return "running /bin/echo threw"
+            }
+            guard r.ok, r.stdout.contains("hello") else { return "bad result: \(r)" }
+            guard let fail = try? ProcessRunner.run("/bin/sh", ["-c", "exit 3"]), fail.exitCode == 3
+            else { return "non-zero exit code not propagated" }
+            return nil
+        }
+
         log?("diagnostics")
 
         check("IOReturn descriptions name the codes we actually hit") {
