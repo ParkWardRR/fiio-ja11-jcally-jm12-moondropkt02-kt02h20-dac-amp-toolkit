@@ -201,7 +201,20 @@ Grow beyond the JA11, evidence‑first.
 
 ## 💡 Ideas / nice‑to‑have
 
-- **EQ / PEQ tuning** over the `0xFF01` control channel (the *app* protocol `W/R/S/C`) from the TUI.
+- **EQ / PEQ tuning** over the `0xFF01` control channel (the *app* protocol `W/R/S/C`) from the
+  TUI. No longer just an idea with a static-RE sketch — [`research/android-app-re-findings.md`](research/android-app-re-findings.md)
+  §4/§4d now has a byte-level spec **cross-validated against two independent open-source
+  projects** that already talk to real FiiO/KT02H20-family DACs over this exact channel:
+  [glacier-eq](https://github.com/Bukutsu/glacier-eq) (Tauri+Rust+React PEQ editor; JA11 listed
+  `Testing`) and [fiiocontrol-oss](https://github.com/adithyasource/fiiocontrol-oss) (WebHID
+  driver reversed from the official fiiocontrol.fiio.com traffic; JA11 listed as *supported*,
+  not testing). All three sources agree byte-for-byte on report ID `0x02`, the `AA 0A`/`BB 0B`…
+  `EE` frame, and per-band cmd `0x15` layout — but the two external, hardware-facing
+  implementations **disagree with this project's own static Android RE** on master-gain scaling
+  (`×2560`/little-endian, not `×10`/big-endian) and **disagree with each other** on the
+  save/commit-to-flash opcode (`0x18` vs `0x19`). Both are single-session hardware checks away
+  from resolved — see §4d for the exact bytes to try. Once settled, `ktflash`/`ktctl` can
+  implement `eq get/set/save` on top of the same HID transport already used for `unlock`.
 - **In‑TUI flash** with a hard confirmation (currently the TUI hands you the CLI command via `f`).
 - **Auto‑recovery**: detect a stuck bootloader and offer to reflash the last known image.
 
@@ -213,6 +226,10 @@ Grow beyond the JA11, evidence‑first.
 - **Before/after USB descriptors + structured evidence** from any dongle you flash (Phase 6).
 - **PCB photos / JTAG‑SWD pad locations** — the only route to a real firmware backup (Phase 5).
 - **A JCALLY JM12** (or other KT02H20 dongle) with its original firmware image.
+- **A real JA11 to settle the two runtime-EQ discrepancies** in
+  [`research/android-app-re-findings.md`](research/android-app-re-findings.md) §4d: is master gain
+  `×2560`/little-endian or `×10`/big-endian, and is the save/commit opcode `0x18` or `0x19`? Both
+  are one-command HID writes, not a research project — see §4d for the exact bytes.
 
 Build/test with [`flasher/ci.sh`](flasher/ci.sh). Open an issue or PR.
 
@@ -286,6 +303,8 @@ evidence:
 | OrbStack | Hands the dongle to a Linux guest so libusb can claim the interface on macOS |
 | `cross-rs` / `cargo-zigbuild` | Linux x86_64/aarch64 builds (Phase 4) |
 | local CI ([`flasher/ci.sh`](flasher/ci.sh)) | clippy + tests + replay, via pre‑push hook (no GitHub Actions) |
+| [glacier-eq](https://github.com/Bukutsu/glacier-eq) | *Not a dependency* — independent Tauri+Rust+React PEQ editor for the same DAC family (JA11 listed `Testing`). Cross-validates the runtime EQ frame format (`research/android-app-re-findings.md` §4d); its `glacier-core/src/device/` registry + confidence-ladder device table (`Confirmed`/`Family match`/`Testing`) is a useful model to crib from for [Appendix B](#appendix-b--compatibility-data-model) |
+| [fiiocontrol-oss](https://github.com/adithyasource/fiiocontrol-oss) | *Not a dependency* — WebHID JA11 driver reversed from the official fiiocontrol.fiio.com app, JA11 marked as working (not testing). Strongest external corroboration of the `0xFF01` runtime EQ protocol (§4d); its per-device driver file convention (`src/libs/devices/*.js`) is a clean pattern for a future `ktflash` EQ module |
 
 ---
 

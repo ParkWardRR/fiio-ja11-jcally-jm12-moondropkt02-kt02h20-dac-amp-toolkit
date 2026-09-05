@@ -269,6 +269,71 @@ read via the CDC bootloader's own `VER`/`INF`) — i.e. two different version co
 same device, not a contradiction. Needs a real device to resolve; don't assume either number
 is wrong.
 
+## 4d. Cross-validation against independent open-source implementations
+
+Two other open-source projects have independently reverse-engineered (and, unlike
+everything in §4/§4b, actually shipped against real hardware) the same
+`AA 0A .../BB 0B ... EE` runtime control channel:
+
+- **[fiiocontrol-oss](https://github.com/adithyasource/fiiocontrol-oss)**
+  (adithyasource) — a WebHID driver reverse-engineered by sniffing the *official*
+  fiiocontrol.fiio.com web app's own traffic. Lists JA11 under "currently
+  supported" (not "testing"), i.e. it works against real units in the wild.
+  Device driver: [`src/libs/devices/fiioJa11.js`](https://github.com/adithyasource/fiiocontrol-oss/blob/main/src/libs/devices/fiioJa11.js).
+- **[glacier-eq](https://github.com/Bukutsu/glacier-eq)** (Bukutsu) — a
+  Tauri+Rust+React cross-platform PEQ editor with a device-registry
+  architecture; lists FiiO JA11 as `Testing` (family match, not yet fully
+  confirmed). JA11 protocol impl: `glacier-core/src/device/fiio.rs`
+  (`JA11_PROTOCOL` vs. a separate `FIIO_PROTOCOL` for other FIIO products
+  sharing the same frame builder).
+
+**Agrees with §4, byte-for-byte** (report ID `0x02`, `AA 0A`/`BB 0B`…`EE` framing,
+cmd `0x15` per-band layout — `index, gain×10 BE i16, freq BE u16, Q×100 BE u16,
+type`, and the 3-value JA11 filter-type enum `0=Peak/1=LowShelf/2=HighShelf`):
+strong independent confirmation this part of the static RE is correct.
+
+**Disagrees with §4 on the master/global gain encoding (cmd `0x17`).** §4 claims
+"16-bit signed, ×10, [implicitly big-endian like the other fields]" from the
+Android app's static RE alone. Both external, hardware-facing implementations
+instead use **×2560 scale, little-endian**, clamped to ±12 dB
+(`fiioJa11.js`: `value = round(clamp(-12,12,v)*2560)`, sent
+`value & 0xff, (value>>8)&0xff`; `fiio.rs`: `JA11_PROTOCOL { gain_scale: 2560.0,
+endian: Little, .. }`) — and they agree with each other exactly. Given both are
+field-tested (or field-adjacent) against real JA11 units and the Android
+decompile for this one field was never hardware-checked, **treat ×2560/little-
+endian as the more likely-correct value for master gain**, and treat §4's
+"×10, presumably big-endian" for cmd `0x17` as probably describing a *different*
+FIIO product sharing the `qa.b` frame builder, not the JA11 specifically. This
+needs a real JA11 to settle definitively — it's an easy one-command hardware
+check (`ktctl` doesn't exist yet, but a raw HID write of `AA 0A 00 00 17 02 00
+00 00 EE` — gain `0.0`, or a nonzero test value — against report ID `2`, then
+read back with `BB 0B 00 00 17 00 00 EE`, would confirm which encoding round-
+trips correctly).
+
+**A command §4 never found: save/commit-to-flash — and the two external
+projects disagree with each other.** Neither the Windows tool nor this app
+decompile surfaced a distinct "persist to NVM" opcode; §4 only covers live
+`W/R` of RAM state. The two external repos both have one, but *not the same
+one*: `fiiocontrol-oss` (tested, JA11-supported) sends
+`AA 0A 00 00 19 01 03 00 EE` (cmd `0x19`/25, payload `[3]`) after writing all
+bands; `glacier-eq`'s `JA11_PROTOCOL` overrides a generic `FIIO_PROTOCOL`
+default of cmd `0x19` down to **cmd `0x18`/24, payload `[1]`**, specifically for
+JA11 — but JA11 is only `Testing` status there, so that override may itself be
+unconfirmed/aspirational rather than hardware-derived. **Unresolved**: which of
+`0x18`/`payload=1` or `0x19`/`payload=3` (or both, for different purposes) is
+the real JA11 save command. Needs hardware to settle; `fiiocontrol-oss`'s claim
+carries more weight since its JA11 support is marked working, not "testing."
+
+**Net effect on Open items below**: the ROADMAP "Ideas" item — EQ/PEQ tuning
+from the TUI — is now much closer to a known-good spec than "concrete from one
+static RE pass" (§4's original framing): three independent sources (this app,
+a shipped WebHID driver, a cross-platform Rust/Tauri app) converge on the same
+per-band framing, and the two open, hardware-facing ones converge on master-gain
+scaling. What's left before implementing in `ktflash`/`ktctl` is real-hardware
+confirmation of (a) master gain ×2560/little-endian over ×10/big-endian, and
+(b) the correct save/commit opcode+payload — both single-session checks against
+a real JA11, not further static RE.
+
 ## 5. Native libraries — not pursued further
 
 - `libapp.so` / `libflutter.so` — Flutter/Dart AOT snapshot. Everything relevant to
@@ -294,3 +359,9 @@ is wrong.
 4. A live USB capture (Wireshark + usbmon, or a rooted-phone / OTG-analyzer setup)
    would upgrade all of §4 from "static-only" to hardware-confirmed, the same way
    §2 was upgraded in `docs/CDC-PROTOCOL.md`.
+5. **(new, from §4d)** On real JA11 hardware: confirm master gain (cmd `0x17`)
+   is `×2560`/little-endian (per `fiiocontrol-oss`/`glacier-eq`) and not `×10`/
+   big-endian (per this doc's original Android-only read); and determine the
+   correct save/commit-to-flash opcode — `0x18` payload `[1]` (`glacier-eq`) vs.
+   `0x19` payload `[3]` (`fiiocontrol-oss`, JA11-tested) vs. possibly both for
+   different purposes.
