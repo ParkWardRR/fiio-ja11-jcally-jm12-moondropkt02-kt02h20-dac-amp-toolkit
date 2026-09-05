@@ -27,11 +27,13 @@
 > own risk**. `ktflash flash-cdc` refuses to write without `--yes` for exactly this reason.
 
 > [!NOTE]
-> **macOS‑first, no Windows required.** `ktflash` identifies dongles natively on macOS and, via
-> **OrbStack**, reaches the USB endpoints macOS itself blocks — to handshake, unlock, diagnose,
-> **and flash**. The end‑to‑end native *write* is ✅ **proven on hardware** (2026‑09‑05):
-> `ktflash flash-cdc` reflashed the stock `JA11_V2.2.bin` over the CDC bootloader, entirely from
-> a Mac + OrbStack — no Mac mini, no Windows, no vendor tool.
+> **macOS‑first, no Windows required — and Linux‑native works too.** `ktflash` identifies dongles
+> natively on macOS and, via **OrbStack**, reaches the USB endpoints macOS itself blocks — to
+> handshake, unlock, diagnose, **and flash**. The end‑to‑end native *write* is ✅ **proven on
+> hardware** two independent ways (2026‑09‑05): `ktflash flash-cdc` reflashed the stock
+> `JA11_V2.2.bin` over the CDC bootloader from a **Mac + OrbStack** (no Mac mini, no Windows, no
+> vendor tool), and separately, fully **Linux‑native** — over the serial transport on a Debian 13
+> VM, no OrbStack, no libusb claim, dongle reached over the network via `usbipd-win`.
 
 ---
 
@@ -81,12 +83,15 @@ Full flow + the honest per‑step status → [docs/FLASHING.md](docs/FLASHING.md
 | Host | Identify | Unlock / diag | Native write |
 | --- | --- | --- | --- |
 | **macOS (native)** | ✅ | ❌ kernel owns the interface | ❌ |
-| **macOS + OrbStack** | ✅ | ✅ | ✅ **proven** (`flash-cdc`) |
-| **Linux** | ✅ | ✅ | ✅ (same binary/path; native test ⏳) |
+| **macOS + OrbStack** | ✅ | ✅ | ✅ **proven** (`flash-cdc`, libusb) |
+| **Linux (native)** | ✅ | ✅ | ✅ **proven** (`flash-cdc`, serial transport — Debian 13) |
 
-macOS can't claim the dongle's USB interface (`IOHIDFamily` owns it). OrbStack passes the device
-to a Linux guest where libusb works — the whole thing still runs from your Mac's Terminal.
-Linux‑native (no OrbStack) is the next milestone.
+macOS can't claim the dongle's USB interface (`IOHIDFamily` owns it) — OrbStack passes the device
+to a Linux guest where libusb works, and the whole thing still runs from your Mac's Terminal.
+**Linux needs no such detour**: install the [udev rules](packaging/99-ktflash.rules) and
+`ktflash` drives the bootloader over its CDC‑ACM tty directly. Prebuilt Linux binaries are ⏳
+next — for now, `cargo build --release` from source. Full validation notes (including a real
+RHEL/AlmaLinux limitation with USB/IP test rigs) → [ROADMAP Phase 4](ROADMAP.md#phase-4--linuxnative-release--write-proven-2026-09-05--binaries-).
 
 ---
 
@@ -136,13 +141,16 @@ Full table + how to vet a candidate → [docs/COMPATIBILITY.md](docs/COMPATIBILI
 
 ## 🧭 Status & help wanted
 
-- ✅ **Protocol fully reversed + native write PROVEN on hardware** — `ktflash flash-cdc` did a
-  complete reflash of the stock `JA11_V2.2.bin` from a Mac + OrbStack (`v1.1.0`, 2026‑09‑05).
+- ✅ **Protocol fully reversed + native write PROVEN on hardware, two ways** — `ktflash flash-cdc`
+  did a complete reflash of the stock `JA11_V2.2.bin` from a Mac + OrbStack (`v1.1.0`) and,
+  separately, fully Linux‑native over the serial transport on a Debian 13 VM (2026‑09‑05, no
+  OrbStack — see [ROADMAP Phase 4](ROADMAP.md#phase-4--linuxnative-release--write-proven-2026-09-05--binaries-)).
 - ❌ **Firmware backup is not possible in software** on the KT02H20 (no read command; the
   normal‑mode reader is inert on this silicon) — keep your original image. [Why.](docs/CDC-PROTOCOL.md)
-- 🚧 **Next:** Linux‑native (no‑OrbStack) test + prebuilt binaries; more KT02H20 dongles.
-- 🟡 **Wanted:** a Linux‑native flash report; before/after descriptors from any dongle you flash;
-  **PCB photos / JTAG‑SWD pad locations** (the only path to a real backup); a JCALLY JM12 + its stock image.
+- 🚧 **Next:** prebuilt binaries (Linux + macOS); more KT02H20 dongles; AlmaLinux/RHEL hardware
+  validation on a native (non‑USB/IP) machine.
+- 🟡 **Wanted:** before/after descriptors from any dongle you flash; **PCB photos / JTAG‑SWD pad
+  locations** (the only path to a real backup); a JCALLY JM12 + its stock image.
 
 Full plan (done vs. next) → [ROADMAP.md](ROADMAP.md). Tooling is **Rust + shell** (no Python).
 

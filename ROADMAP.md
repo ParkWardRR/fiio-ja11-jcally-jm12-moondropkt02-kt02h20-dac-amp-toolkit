@@ -18,11 +18,12 @@ Windows is only ever a reverse‑engineering source.
 
 > ## 📍 You are here
 >
-> **The native write is done and proven on hardware** (`v1.1.0`, 2026‑09‑05): `ktflash flash-cdc`
-> reflashed the stock `JA11_V2.2.bin` end‑to‑end over the CDC bootloader, entirely from a
-> **Mac + OrbStack** — no Mac mini, no Windows, no vendor tool. Phases 0–3 are complete. The
-> frontier now is **Phase 4 (Linux‑native release / binaries)** and **Phase 6 (more dongles)**.
-> **Phase 5 (software backup) is closed as *not possible* on this silicon** — it needs hardware.
+> **The native write is proven on hardware on *two* independent paths now** (2026‑09‑05):
+> **macOS + OrbStack** (`v1.1.0`, raw libusb) and, the same day, **Linux‑native over the serial
+> transport** (`v1.1.1`+, a Debian 13 VM with the dongle reached over `usbipd-win` from a Windows
+> host — no OrbStack, no libusb claim). Phases 0–4 are complete. The frontier now is **Phase 4.2
+> (prebuilt binaries)** and **Phase 6 (more dongles)**. **Phase 5 (software backup) is closed as
+> *not possible* on this silicon** — it needs hardware.
 
 ---
 
@@ -33,7 +34,7 @@ Phase 0  Reverse-engineer to the bootloader ........................... ✅ done
 Phase 1  Hardware-free protocol + safety core ........................ ✅ done
 Phase 2  Reverse the CDC download protocol  ⭐ .................... ✅ done (was the blocker)
 Phase 3  Native flash on hardware (writer)  ⭐ ................... ✅ done — PROVEN on hardware
-Phase 4  Linux-native release (binaries, notarization) .............. 🚧 code in / release ⏳
+Phase 4  Linux-native release (binaries, notarization) .............. ✅ write proven · binaries ⏳
 Phase 5  Firmware backup / readback ................................. ❌ not possible in software
 Phase 6  Fleet: JM12, compatibility matrix, dongle discovery ........ ⏳ needs evidence
 ```
@@ -99,16 +100,38 @@ why backup is impossible in software.
 
 ---
 
-## Phase 4 — Linux‑native release 🚧 *(code in; release pending)*
+## Phase 4 — Linux‑native release ✅ *write PROVEN 2026‑09‑05* · binaries ⏳
 
-Drop the OrbStack detour on Linux and ship binaries.
+Drop the OrbStack detour on Linux — **done for the write path**; binaries/notarization remain.
 
-1. 🚧 **Native transport + udev**: `RusbBootloaderTransport` (done) +
-   [`packaging/99-ktflash.rules`](packaging/99-ktflash.rules) + [`docs/LINUX.md`](docs/LINUX.md).
-   ⏳ *Test `flash-cdc` on real Debian/Arch over `hidraw`/libusb (no OrbStack).*
+1. ✅ **Native transport + udev, hardware‑confirmed**: the serial transport
+   ([`flasher/src/serialtransport.rs`](flasher/src/serialtransport.rs), previously "untested
+   against hardware") drove a **complete `flash-cdc --execute` write** — 67/67 packets ACKed,
+   erase, `STP`, `RESET` all clean — over `/dev/ttyACM0` on a **Debian 13** VM, no `sudo`, no
+   OrbStack, no libusb claim. [`packaging/99-ktflash.rules`](packaging/99-ktflash.rules) needed a
+   real fix first: see finding below. Full session narrative → Appendix D.
 2. ⏳ **Prebuilt binaries** (x86_64 + aarch64) via `cross-rs`/`cargo-zigbuild` + SHA‑256 checksums.
 3. ⏳ **macOS notarization** (Apple Developer signing) — prerequisite for a Homebrew tap.
 4. ✅ **Reproducibility**: `Cargo.lock` committed; toolchain/target recorded.
+
+**Finding — `uaccess` is a no‑op on headless Linux, `plugdev` is not optional:** the shipped
+`99-ktflash.rules` relied on systemd‑logind `uaccess` (seat‑local access) with the `GROUP=plugdev`
+fallback commented out. On a real headless VM (SSH‑only session, no logind seat —
+`loginctl show-session … -p Seat` prints empty), `uaccess` grants nothing: `ktflash probe` still
+needed `sudo` to read manufacturer/product/serial strings. Adding `GROUP="plugdev", MODE="0660"`
+(now uncommented by default) fixed it immediately, with no downside on desktop systems where
+`uaccess` still applies on top. **Ship both, always** — this was an open question in
+[`LINUX-TESTING.md`](docs/LINUX-TESTING.md) §3 P1; it's now answered from real hardware, not
+just predicted.
+
+**Finding — AlmaLinux/RHEL cannot be a USB/IP client, by Red Hat's own choice:** attempting the
+same validation on AlmaLinux 10.2 hit a hard wall *before* `ktflash` was even involved: RHEL's
+`kernel-devel` source tree ships `drivers/usb/usbip/{Kconfig,Makefile}` with the actual `.c`
+driver source **removed**, and no `vhci-hcd` module anywhere in `kernel-modules-extra`. This is a
+limitation of *this specific test rig* (dongle reached over `usbipd-win`, which needs `vhci-hcd`
+on the client) — a real RHEL box with the dongle plugged in directly would be unaffected, since
+`ktflash` itself has no USB/IP dependency. Recorded here so nobody re-discovers this the hard way;
+Debian's result stands as the Linux‑native proof for this round.
 
 ---
 
@@ -256,6 +279,8 @@ the raw record of what was confirmed, and the operational context for anyone pic
 | Bootloader is a **one‑shot sequential** state machine | After `KTM` is consumed, repeat `KTM` → no reply until re‑unlock |
 | Block checksum = standard CRC‑32, poly `0xEDB88320` | Table @ `0x0120e020` — first 8 words match canonical CRC‑32 (byte‑exact) |
 | `flash-cdc` full reflash of `JA11_V2.2.bin` | 67 packets, all ACKed; device re‑enumerated to `2972:0102` — Mac + OrbStack, 2026‑09‑05 |
+| **Serial transport (CDC‑ACM tty) drives the full protocol**, not just libusb bulk | `bootdiag --send` (KTM→`0x78`) *and* a complete `flash-cdc --execute` (67/67 packets, erase, `STP`, `RESET`) over `/dev/ttyACM0` — Debian 13 VM, 2026‑09‑05 (§ below) |
+| A repeated `KTM` after the handshake is already consumed gets **zero bytes back**, not garbage | `flash-cdc` on an already‑progressed bootloader → `KTM: expected [78], got [] after 800ms` — clean, safe, non‑destructive failure; journal recorded `Staged`→`Failed`, `safe_next_action: CancelOrBegin` |
 
 ## Operational gotchas
 
@@ -269,6 +294,79 @@ the raw record of what was confirmed, and the operational context for anyone pic
   normal VID/PID to `8888:cdc0` on reboot, and OrbStack won't follow it automatically.
 - **Git guard:** commits and pushes require `GIT_ALLOW_REAL_NAME=1` on both operations, with
   the machine's configured `user.name`/`user.email` (`git config --global user.name/user.email`).
+
+## 2026‑09‑05 — Linux‑native validation, session narrative (VELOCE Hyper‑V lab)
+
+Recorded in full because it's the kind of session worth writing up later: what was tried, what
+broke, and what the breakage taught us. The dongle spent this entire session plugged into a
+**Windows 10 Pro** box (`VELOCE`) with two Hyper‑V Linux guests (Debian 13, AlmaLinux 10.2) on an
+internal NAT switch — no OrbStack anywhere in this loop.
+
+**Getting the dongle off Windows and into a guest.** Hyper‑V has no built‑in USB passthrough, so
+the plan was Option B from [`LINUX-TESTING.md`](docs/LINUX-TESTING.md) §2.2: export it from
+Windows. `usbipd-win` wasn't installed; `winget install dorssel.usbipd-win` put it on in under a
+minute, and it auto‑created its own inbound firewall rule and started listening on `3240` with no
+extra steps. Binding the dongle (`usbipd bind --busid 1-4`) needed `--force` — a leftover
+`USBPcap` filter driver from the original protocol‑reversing session on this same machine
+conflicts with usbipd's own filter. On the Debian 13 guest, `apt install usbip` + `modprobe
+vhci-hcd` was all it took; `usbip attach -r <host-LabNAT-ip> -b 1-4` and the dongle showed up in
+`lsusb` like any other USB device.
+
+**The re‑enumeration trap, hit exactly as documented.** The first `ktflash unlock` rebooted the
+dongle to `8888:cdc0` — and Windows immediately dropped the usbipd share, rebinding the device to
+its native "USB Serial Device (COM3)" driver, exactly the failure mode §2.1 warns about. The fix
+was exactly what the doc prescribes: `usbipd bind --busid 1-4 --force` again (same busid, new
+VID:PID, needs re‑sharing every time), then `usbip attach` again on the guest. This needed to
+happen after *every* unlock for the rest of the session — scripting it is the obvious next step
+for anyone doing this repeatedly.
+
+**The permissions question that was previously just a prediction.** `ktflash probe` ran fine
+without `sudo` (device enumeration doesn't need it) but came back with **empty** manufacturer/
+product/serial strings until `sudo` was added — reading string descriptors needs an opened device
+handle, which needs udev to grant access. Installing the shipped `99-ktflash.rules` (uaccess‑only
+at the time) changed nothing: `loginctl show-session … -p Seat` printed empty for the SSH session,
+confirming there's no logind seat to grant uaccess *to*. Adding the commented‑out
+`GROUP="plugdev"` line and reloading udev fixed it on the same running device, no replug needed.
+This is now the shipped default (Phase 4 above) — a real, previously‑open question closed by
+hitting it on real hardware rather than reasoning about it.
+
+**First hardware proof the serial transport actually works.** Everything about
+`serialtransport.rs` had been "compiles, never run" since the APPLY.md handoff. `ktflash bootdiag`
+opened `/dev/ttyACM0` cleanly (auto‑selected over libusb, as designed); `bootdiag --send` got the
+`KTM`→`0x78` handshake back over the tty. Small thing, but it was the first byte of protocol ever
+exchanged over a CDC‑ACM tty in this project instead of raw USB bulk endpoints.
+
+**A safe failure that proved the safety model, not just the happy path.** `bootdiag --send`
+advances the one‑shot bootloader state machine — by design, so this was known going in. Running
+`flash-cdc --execute --yes` right after, without a fresh `unlock`, produced exactly the failure
+the docs predict: `KTM: expected [78], got [] after 800ms`, zero bytes back, nothing erased. The
+journal recorded `Staged` → `Failed` and reported `safe_next_action: CancelOrBegin` — correctly
+telling the operator nothing destructive happened and a plain retry is fine. This was the first
+time that logic ran against real hardware in a genuinely wrong state, not a `FakeKt` unit test.
+
+**Recovering needed a real power cycle, and the easy ways didn't work.** `Disable-PnpDevice`
+failed with the same `HRESULT 0x80041001` WMI error seen elsewhere in this lab's history;
+`pnputil /disable-device` / `/enable-device` both returned "This command is not supported on this
+OS product" (a client‑SKU restriction). With no way to soft‑reset the port remotely, the operator
+physically unplugged and replugged the dongle. It came back as `2972:0102`, still bound to
+usbipd's share (bus/port didn't change) — one thing that *did* just work.
+
+**The full, real write.** `unlock` → rebind → reattach → `flash-cdc --image JA11_V2.2.bin
+--execute --yes`: `KTM`, `CHP` (13‑byte chip‑info blob), `ERASE`, `PWO`, `KSTA` (erase), all 67
+data packets ACKed (`78 a5` each), `STP`, `RESET` — all clean, first attempt after the fresh
+unlock. The device re‑enumerated as `2972:0102`, and `ktflash fingerprint` reported the **same
+descriptor SHA‑256** as before the flash. This is the first hardware run of the *refactored*
+driver (`proto::ktcdc_driver` + `proto::ktcdc_journal`, previously validated only against a fake
+bootloader) and the first flash of any kind over serial + USB/IP rather than raw libusb + OrbStack.
+
+**Where AlmaLinux stopped it cold.** Installing build deps was normal EL packaging (`dnf`, EPEL
+for nothing usbip‑related — EPEL doesn't have it either). The dead end was structural: RHEL's own
+`kernel-devel` source tree ships `drivers/usb/usbip/` with only `Kconfig` and `Makefile` — **the
+driver's `.c` source is not there**, and `vhci-hcd` isn't in `kernel-modules-extra` either. This
+is Red Hat choosing not to ship USB/IP client support, not a packaging gap to route around with
+`dnf search` harder. It blocks *this rig* (dongle reached via `usbipd-win`), not `ktflash` itself
+— a real RHEL machine with the dongle plugged in directly would never hit this. Decision: leave
+Alma's hardware validation for whenever the dongle can be plugged into a native Linux box.
 
 ## Windows box VELOCE (recovery + RE source)
 
