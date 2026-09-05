@@ -3,8 +3,9 @@
 A **chronological** map of this toolkit — the phases in the order they happen, what each
 delivers, and exactly where the frontier is today.
 
-**Direction:** macOS + OrbStack first (✅ working) → Linux‑native next. **No Windows user path** —
-Windows is only ever a reverse‑engineering source.
+**Direction:** native on macOS and Linux, no OrbStack required on either (✅ proven both ways) —
+OrbStack remains a supported fallback. **No Windows user path** — Windows is only ever a
+reverse‑engineering source.
 
 **Legend:** ✅ done · 🚧 in progress · ⏳ planned · ❌ not possible (see why) · ⭐ pivotal
 
@@ -39,7 +40,7 @@ Phase 0  Reverse-engineer to the bootloader ........................... ✅ done
 Phase 1  Hardware-free protocol + safety core ........................ ✅ done
 Phase 2  Reverse the CDC download protocol  ⭐ .................... ✅ done (was the blocker)
 Phase 3  Native flash on hardware (writer)  ⭐ ................... ✅ done — PROVEN on hardware
-Phase 4  Linux + macOS native release (binaries, notarization) ...... ✅ write + binaries built · release ⏳
+Phase 4  Linux + macOS native release (binaries, notarization) ...... ✅ v1.2.0 released · notarization ⏳
 Phase 5  Firmware backup / readback ................................. ❌ not possible in software
 Phase 6  Fleet: JM12, compatibility matrix, dongle discovery ........ ⏳ needs evidence
 ```

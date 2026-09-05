@@ -1,8 +1,9 @@
 //! A small, pretty live dashboard for KTMicro KT02H20 / FiiO JA11 dongles.
-//! Read‑only on macOS (identify + watch mode transitions). `u` attempts an unlock and
-//! `f` shows the native‑flash guidance — the actual write runs via `ktflash flash-cdc`
-//! in the OrbStack guest (macOS can't claim the interface). The native CDC write is
-//! proven on hardware; the TUI keeps loudly reminding you to **back up first**.
+//! Works natively on macOS and Linux, no OrbStack required. `u` attempts an unlock — on
+//! macOS this auto-detects the `ktmac` companion binary if it's built (`docs/MACOS-NATIVE.md`),
+//! falling back to a `rusb` attempt otherwise — and `f` shows the native‑flash guidance. The
+//! native CDC write is proven on hardware on both OSes; the TUI keeps loudly reminding you to
+//! **back up first**.
 
 use std::time::{Duration, Instant};
 
@@ -75,7 +76,7 @@ impl App {
                     self.logline("unlock → sending T12345678…", AMBER);
                 }
                 3 => self.logline("rebooted → bootloader 8888:cdc0 (CDC)", MAG),
-                4 => self.logline("native write: ktflash flash-cdc (OrbStack)…", ACCENT),
+                4 => self.logline("native write: ktflash flash-cdc (no OrbStack)…", ACCENT),
                 5 => {
                     self.logline("UPGRADE FIRMWARE SUCCESS ✓", GREEN);
                     self.logline("now running: JadeAudio JA11 (2972:0102)", GREEN);
@@ -153,12 +154,12 @@ impl App {
                 }
             }
             KeyCode::Char('f') => {
-                self.logline("native flash (runs in OrbStack, not macOS):", ACCENT);
+                self.logline("native flash (macOS or Linux — no OrbStack required):", ACCENT);
                 self.logline("  ⚠ NO backup possible — this can BRICK it. Own risk.", RED);
                 self.logline("  1. SAVE your original firmware image first!", RED);
-                self.logline("  2. orb usb attach <id>  (re-attach after unlock)", DIM);
-                self.logline("  3. ktflash unlock   → fresh CDC bootloader", DIM);
-                self.logline("  4. ktflash flash-cdc --image fw.bin --execute --yes", GREEN);
+                self.logline("  2. ktflash unlock   → fresh CDC bootloader", DIM);
+                self.logline("     (auto-detects ktmac on macOS)", DIM);
+                self.logline("  3. ktflash flash-cdc --image fw.bin --execute --yes", GREEN);
                 self.logline("  see docs/FLASHING.md — flag auto-derived from image", DIM);
             }
             _ => {}

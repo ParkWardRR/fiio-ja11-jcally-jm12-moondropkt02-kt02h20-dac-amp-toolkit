@@ -1,6 +1,6 @@
 [package]
 name = "ktflash"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 description = "Beautiful TUI + CLI to probe/unlock/flash KTMicro KT02H20 USB-C DAC dongles (FiiO JA11 family) natively on macOS and Linux"
 license = "BlueOak-1.0.0"
@@ -34,7 +34,8 @@ lto = true
 # /usr/lib/udev/rules.d — the step users forget, whose failure mode (LIBUSB_ERROR_ACCESS) looks
 # like a broken tool rather than a permissions problem.
 #
-# STATUS: UNVERIFIED — cargo-deb has never been run against this manifest.
+# STATUS: verified 2026-09-05 — cargo-deb output inspected (binary, udev rules, docs,
+# postinst all present at the correct paths). Not yet installed on a live Debian/Ubuntu host.
 # ---------------------------------------------------------------------------
 [package.metadata.deb]
 maintainer = "ParkWardRR <noreply@github.com>"
@@ -64,7 +65,8 @@ maintainer-scripts = "../packaging/deb/"
 # ---------------------------------------------------------------------------
 # .rpm packaging (cargo-generate-rpm). AlmaLinux 9/10, RHEL, Rocky, Fedora.
 #
-# STATUS: UNVERIFIED — cargo-generate-rpm has never been run against this manifest.
+# STATUS: verified 2026-09-05 — RPM built successfully (lead magic + size sanity-checked; no
+# rpm(8) on macOS to inspect contents directly). Not yet installed on a live Alma/RHEL host.
 # ---------------------------------------------------------------------------
 [package.metadata.generate-rpm]
 license = "BlueOak-1.0.0"

@@ -1,19 +1,52 @@
 # Changelog
 
-## [Unreleased] — prebuilt binaries built + signed locally (not yet published)
+## [1.2.0] — 2026‑09‑05 — first release: native macOS + Linux, no OrbStack required
+
+The headline: this project's own long‑standing claim that macOS couldn't drive the unlock at
+all was wrong. This release is fully native on both macOS and Linux as a result — plus the
+Linux‑native write path, the `ktmac` merge, the post‑reset reprobe, and the first prebuilt
+binaries. This is the first tagged release.
 
 ### Added
-- macOS universal binary (`aarch64`+`x86_64` via `lipo`, ad-hoc signed after lipo per
-  `docs/RELEASE-PLAN.md` §4.2) — runs and correctly identifies real hardware.
-- `x86_64`/`aarch64` `unknown-linux-musl` static binaries via `cargo-zigbuild --features
-  vendored` — `file` confirms "statically linked", no runtime dependencies.
-- `.deb` (via `cargo-deb`) and `.rpm` (via `cargo-generate-rpm`), both built from the static
-  x86_64 musl binary — contents inspected and correct (binary, udev rules, docs, maintainer
-  scripts all present at the right paths).
-- `SHA256SUMS` + a real minisign signature (`packaging/ktflash.pub` committed; secret key held
-  offline, encrypted with a random passphrase, never in this repo) — both verify.
+- **Linux‑native write, proven on hardware**: a full `flash-cdc --execute --yes` write completed
+  on a real Debian 13 VM over the serial transport — 67/67 packets ACKed, device re‑enumerated
+  as a working JA11 with an identical descriptor SHA‑256 to before. First hardware run of the
+  refactored driver/journal code.
+- **`ktflash bootdiag --send`** — an explicit, advancing liveness check (sends `KTM`, waits for
+  the `0x78` ACK) alongside the default non‑advancing `bootdiag`. Both now work over
+  `--transport auto|serial|usb`.
+- **`proto::ktcdc_driver` / `proto::ktcdc_journal`** — the flash-cdc state machine and its
+  operation journal, lifted out of `main.rs` onto the `Transport` trait so they're unit-tested
+  independent of `rusb`.
+- **`serialtransport.rs` / `boottransport.rs`** — a CDC-ACM tty transport (serial, preferred by
+  default) alongside the existing libusb path, so Linux and macOS can both drive the bootloader
+  without claiming a USB interface.
+- **macOS‑native write, proven on hardware, same day**: `IOHIDManagerOpen`/`IOHIDDeviceSetReport`
+  via the `ktmac` Swift companion reaches the device natively for `unlock` (the only prerequisite
+  is Input Monitoring consent, macOS TCC) — confirmed with a complete `flash-cdc --transport
+  serial` write, 67/67 packets, no OrbStack involved.
+- **`flasher/src/macos_ktmac.rs`** — `ktflash unlock` (and the TUI's unlock action) now
+  auto-detects a `ktmac` binary on macOS (`KTMAC_PATH` env, next to the running executable, or
+  `$PATH`) and shells out to it, instead of requiring a separate manual `ktmac unlock --send`
+  step. Falls back to the previous `rusb` attempt (and its OrbStack pointer) if `ktmac` isn't
+  built. Confirmed on real hardware: `ktflash unlock` with no flags triggered the bootloader via
+  `ktmac`, and `ktflash flash-cdc` completed the write on the same run.
+- **Post-reset reprobe** (`proto::postflash`, ROADMAP Phase 3.4): after `RESET`, `flash-cdc` now
+  polls the bus and records `Confirmed`/`IdentityMismatch`, so `ktflash recover` can finally say
+  *done* — previously a journal topped out at `ResetIssued` and a flash that reset into a
+  non-booting image looked identical to one that worked. New flags: `--expect VID:PID`,
+  `--no-reprobe`, `--reprobe-timeout`. Confirmed on hardware: `[reprobe] ✅ 2972:0102 — Flash
+  confirmed`, `ktflash recover` reporting `Confirmed`/`Done`.
+- **Prebuilt binaries, built and signed**: macOS universal binary (`aarch64`+`x86_64` via
+  `lipo`, ad-hoc signed after lipo), `x86_64`/`aarch64` `unknown-linux-musl` static binaries via
+  `cargo-zigbuild --features vendored` (confirmed static with `file`), `.deb` (`cargo-deb`) and
+  `.rpm` (`cargo-generate-rpm`), `SHA256SUMS` + a real minisign signature (`packaging/ktflash.pub`
+  committed; secret key held in a password manager, never in this repo).
 
 ### Fixed
+- **`packaging/99-ktflash.rules`**: `uaccess`-only default is a no-op on headless Linux (no
+  logind seat, confirmed on a real headless VM) — `GROUP="plugdev"` is now uncommented by
+  default alongside it.
 - **`serialtransport.rs`**: `libc::ioctl`'s request-parameter type differs between glibc
   (`c_ulong`) and musl (`c_int`) — a real bug that only surfaced by actually cross-compiling to
   `x86_64-unknown-linux-musl`, since every prior Linux build/test ran natively against glibc.
@@ -23,63 +56,32 @@
   `{ program, script }` table that had been drafted by analogy with other formats. Also added
   `auto-req = "disabled"` — `requires = {}` alone doesn't stop the tool from shelling out to
   `ldd` for dependency auto-detection, which fails outright on a host with no `ldd`.
+  Both corrected `docs/PROTOCOL.md`, `docs/FLASHING.md`, `usbtransport.rs`, and
+  `orbstack/README.md` (OrbStack demoted to a documented fallback, not the only path).
 - **`flasher/Cargo.toml`**: the package `description` still said "from macOS + OrbStack" as the
   only path, surfaced by actually reading the built `.deb`'s control file.
-
-### Not done, deliberately
-- Not published — `gh release create` is a separate, visible decision, held for explicit go/no-go.
-- Signing key needs to move from local encrypted-at-rest storage to durable secure custody
-  (password manager or hardware key) before any real release.
-- `.deb`/`.rpm` not installed on a live guest — no such host was available at build time.
-
-## [Unreleased] — `ktmac` merged into `ktflash unlock`; AlmaLinux/RHEL validation dropped
-
-### Added
-- **`flasher/src/macos_ktmac.rs`** — `ktflash unlock` (and the TUI's unlock action) now
-  auto-detects a `ktmac` binary on macOS (`KTMAC_PATH` env, next to the running executable, or
-  `$PATH`) and shells out to it, instead of requiring a separate manual `ktmac unlock --send`
-  step. Falls back to the previous `rusb` attempt (and its OrbStack pointer) if `ktmac` isn't
-  built. Confirmed on real hardware: `ktflash unlock` with no flags triggered the bootloader via
-  `ktmac`, and `ktflash flash-cdc` completed the write on the same run.
+- **`flasher/src/tui.rs`** and **`main.rs`**'s HELP text/module docs: several places still
+  described `unlock`/`flash-cdc` as OrbStack-only, contradicted by the native proof above.
+- Fixed a pre-existing mislabeled cross-reference in `ROADMAP.md` (a link read "Appendix C" but
+  pointed at Appendix B's anchor).
 
 ### Removed
 - **AlmaLinux/RHEL hardware validation is no longer a project goal.** RHEL's kernel packaging
   deliberately excludes the `vhci-hcd` USB/IP client driver, so a RHEL/Alma guest can never be
   reached over this project's `usbipd-win`-based remote test rig. The `.rpm` package and static
   musl binary still ship for Alma/RHEL — only the "validate it over this remote rig" goal is
-  dropped. See README and `ROADMAP.md` Appendix D for the full finding.
+  dropped. Documented in the `.rpm` control metadata not applying here — see README and
+  `ROADMAP.md` Appendix D for the full finding.
 
-## [Unreleased] — Linux‑native flash proven on hardware — 2026‑09‑05
-
-### Added
-- **`ktflash bootdiag --send`** — an explicit, advancing liveness check (sends `KTM`, waits for
-  the `0x78` ACK) alongside the default non‑advancing `bootdiag`. Both now work over `--transport
-  auto|serial|usb`.
-- **`proto::ktcdc_driver` / `proto::ktcdc_journal`** — the flash-cdc state machine and its
-  operation journal, lifted out of `main.rs` onto the `Transport` trait so they're unit-tested
-  independent of `rusb` (93 tests total).
-- **`serialtransport.rs` / `boottransport.rs`** — a CDC-ACM tty transport (serial, preferred by
-  default) alongside the existing libusb path, so Linux (and eventually macOS-native) can drive
-  the bootloader without claiming a USB interface.
-
-### Proven on hardware
-- **Linux-native, no OrbStack**: a full `flash-cdc --execute --yes` write completed on a real
-  Debian 13 VM over the serial transport — 67/67 packets ACKed, device re-enumerated as a working
-  JA11 with an identical descriptor SHA-256 to before. First hardware run of the refactored
-  driver/journal code. Full narrative in `ROADMAP.md` Appendix D.
-- Confirmed `packaging/99-ktflash.rules`'s `uaccess`-only default is a no-op on headless Linux
-  (no logind seat) — `GROUP="plugdev"` is now uncommented by default.
-- Documented a hard AlmaLinux/RHEL limitation: `kernel-devel` ships no `vhci-hcd` driver source,
-  so RHEL-family guests can't be USB/IP clients at all (blocks this test rig, not `ktflash`).
-- **macOS-native, no OrbStack, same day**: this project's own long-standing claim that macOS
-  can't drive the HID `unlock` at all was **wrong** — `IOHIDManagerOpen`/`IOHIDDeviceSetReport`
-  via the `ktmac` Swift companion (`staging/macos-native/ktmac`) reaches the device natively
-  (the only prerequisite is Input Monitoring consent, macOS TCC). Confirmed on real hardware:
-  `ktmac unlock --send` triggered the bootloader, then `ktflash flash-cdc --transport serial`
-  did a complete write — 67/67 packets, same descriptor SHA-256 as before. Corrected the wrong
-  claim in `docs/PROTOCOL.md`, `docs/FLASHING.md`, `usbtransport.rs`, and `orbstack/README.md`
-  (now demoted to a documented fallback, not the only path). `ktmac` is not yet merged into
-  `ktflash` itself — tracked in `docs/MACOS-NATIVE.md` §8.
+### Documented
+- A hard AlmaLinux/RHEL limitation: `kernel-devel` ships no `vhci-hcd` driver source, so
+  RHEL-family guests can't be USB/IP clients at all (blocks this test rig, not `ktflash`).
+- `docs/LINUX.md` rewritten: package install first, `ModemManager` note, current `flash-cdc`
+  usage (it previously described an older, unused `flash --apply` path as "once the codec
+  lands," long after the codec had in fact landed).
+- README Quickstart rewritten to lead with downloading a release, and a new "macOS Gatekeeper:
+  fixing 'cannot be opened'" section explaining exactly when that warning appears (browser
+  downloads only, never `curl`) and how to clear it without disabling Gatekeeper system-wide.
 
 ## [1.1.1] — 2026‑09‑05
 

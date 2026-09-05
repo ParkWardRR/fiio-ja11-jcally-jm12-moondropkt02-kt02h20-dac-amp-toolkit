@@ -55,25 +55,84 @@ at all. See [`docs/MACOS-NATIVE.md`](docs/MACOS-NATIVE.md).
 
 ## 🚀 Quickstart
 
+**Download** (recommended) — grab your platform's file from
+**[the latest release](../../releases/latest)**, verify it, then run it:
+
 ```bash
-# build (needs libusb: `brew install libusb`)
+# macOS — the universal binary needs ad-hoc trust (no Apple Developer ID yet):
+tar xzf ktflash-*-universal-apple-darwin.tar.gz && xattr -d com.apple.quarantine ./ktflash 2>/dev/null
+./ktflash probe
+
+# Linux — package (installs the udev rules for you) or static tarball:
+sudo apt install ./ktflash_*_amd64.deb        # Debian/Ubuntu
+sudo dnf install ./ktflash-*.x86_64.rpm       # AlmaLinux/RHEL/Fedora
+```
+
+If macOS still refuses to run it ("cannot be opened because the developer cannot be verified"),
+see **[the macOS Gatekeeper note below](#macos-gatekeeper-fixing-cannot-be-opened)**.
+
+**Or build from source** (needs a Rust toolchain + `libusb` on macOS: `brew install libusb`):
+
+```bash
 cd flasher && cargo build --release
+./target/release/ktflash          # TUI dashboard (shown above)
+./target/release/ktflash probe    # one-shot report
+```
 
-# identify — pretty, live, read-only, native macOS
-./target/release/ktflash                 # TUI dashboard (shown above)
-./target/release/ktflash probe           # one-shot report
+**Then, on either path — identify, unlock, and flash, all native (no OrbStack needed):**
 
-# flash path: macOS → OrbStack Linux guest (reaches the USB endpoints macOS blocks)
-./orbstack/ktflash-orbstack.sh setup     # create the guest + deps
-./orbstack/ktflash-orbstack.sh attach    # pass the dongle through
+```bash
+ktflash                                            # TUI dashboard — read-only, safe to explore
+ktflash probe                                      # one-shot device report
 
-# ⚠️ SAVE A KNOWN-GOOD IMAGE FIRST — there is no read-back. Then, inside the guest:
-ktflash flash-cdc --image fw.bin         # DRY RUN — prints the packet plan, touches nothing
-ktflash unlock                           # → fresh CDC bootloader (8888:cdc0)
+# ⚠️ SAVE A KNOWN-GOOD IMAGE FIRST — there is no read-back.
+ktflash flash-cdc --image fw.bin                   # DRY RUN — prints the packet plan, touches nothing
+ktflash unlock                                      # → fresh CDC bootloader (8888:cdc0)
+                                                     #   (macOS: auto-detects the ktmac companion if built)
 ktflash flash-cdc --image fw.bin --execute --yes   # writes ( --yes = "I know the risks" )
 ```
 
+OrbStack remains a supported fallback — useful if `ktmac` isn't built yet on macOS, or for
+troubleshooting: [`orbstack/README.md`](orbstack/README.md).
+
 Full flow + the honest per‑step status → **[docs/FLASHING.md](docs/FLASHING.md)**.
+
+---
+
+## macOS Gatekeeper: fixing "cannot be opened"
+
+`ktflash` isn't signed with a paid Apple Developer ID yet (notarization is
+[planned, later](docs/RELEASE-PLAN.md), not required for the tool to work). Whether you hit a
+Gatekeeper warning depends entirely on
+**how the file arrived on your Mac**, not on the file itself:
+
+| How you got it | What happens | Fix |
+|---|---|---|
+| **`curl`/`tar` in Terminal** (the commands above) | Nothing — `curl` never applies Apple's quarantine flag, so it just runs. | Nothing needed. |
+| **Downloaded via a browser** | macOS quarantines it. First run: *"ktflash cannot be opened because the developer cannot be verified."* | See below. |
+
+**If you see that warning**, either:
+
+- **Terminal (fastest):** remove the quarantine flag yourself —
+  ```bash
+  xattr -d com.apple.quarantine ./ktflash
+  ./ktflash probe
+  ```
+- **System Settings (no Terminal):** try to open it once (it'll be blocked), then go to
+  **System Settings → Privacy & Security**, scroll to the message about `ktflash` being blocked,
+  and click **Open Anyway**. On macOS 15 (Sequoia) and later, this Settings step is required —
+  the old Control‑click → Open trick no longer reliably bypasses it.
+
+**Never run `sudo spctl --master-disable`** or otherwise turn Gatekeeper off system‑wide to fix
+this — that disables a real security feature for every app on your Mac, not just this one. Both
+fixes above are scoped to this one binary.
+
+Verify what you downloaded actually matches what was published, before running either fix:
+
+```bash
+shasum -a 256 -c SHA256SUMS                       # matches the checksums file from the release
+minisign -Vm SHA256SUMS -P RWRBoKW7XVEQLaslAJsw+ehM+1AGz90YMA+P7GzCzNZV54aVWtS7PC6n
+```
 
 ---
 

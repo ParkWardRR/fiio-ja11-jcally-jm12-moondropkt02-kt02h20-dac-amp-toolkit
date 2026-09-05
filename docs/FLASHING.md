@@ -39,9 +39,10 @@ that macOS's `IOHIDFamily`/`AppleUSBAudio` drivers own the dongle's interface �
 `LIBUSB_ERROR_ACCESS`, and (this part turned out to be wrong) `IOHIDDeviceSetReport` supposedly
 went down a control pipe the firmware ignores. Confirmed on real hardware: `IOHIDDeviceSetReport`
 via `IOHIDManager` **does** reach the device natively, no interface claim needed — see
-[`docs/MACOS-NATIVE.md`](MACOS-NATIVE.md). The native path today is the `ktmac` companion tool
-(`staging/macos-native/ktmac`) for `unlock`, plus `ktflash flash-cdc --transport serial` for the
-write — no OrbStack, no VM, over the bootloader's CDC‑ACM tty.
+[`docs/MACOS-NATIVE.md`](MACOS-NATIVE.md). `ktflash unlock` itself now auto-detects the `ktmac`
+companion tool (`macos/native/ktmac`) and shells out to it, then `ktflash flash-cdc --transport
+serial` does the write — no OrbStack, no VM, over the bootloader's CDC‑ACM tty, one command
+either way.
 
 **You still need OrbStack if:** `ktmac` isn't built/available yet on your machine, you'd rather
 not grant Input Monitoring consent (native `unlock` requires it — macOS TCC, since 10.15), or

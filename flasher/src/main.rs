@@ -1,15 +1,20 @@
 //! ktflash — a small, pretty tool to identify and drive KTMicro `KT02H20` USB‑C DAC
-//! dongles (the FiiO JA11 family) from **macOS + OrbStack**.
+//! dongles (the FiiO JA11 family), natively on **macOS and Linux** — no OrbStack required.
 //!
 //!   run with no args      → the live TUI dashboard
 //!   ktflash probe         → one‑shot device report (scriptable)
 //!   ktflash handshake     → normal mode: send the 0x4B/0x33 HID frame, read reply
 //!   ktflash unlock        → send "T12345678" → reboot into the CDC bootloader
 //!   ktflash bootdiag      → probe the 0x8888:0xCDC0 bootloader pipe (--send for a KTM check)
+//!   ktflash flash-cdc     → write firmware over the bootloader's serial transport
 //!
-//! `unlock`/`handshake`/`bootdiag` *claim the USB interface*, which macOS refuses
-//! (`IOHIDFamily` owns it → LIBUSB_ERROR_ACCESS). Run them inside the OrbStack Linux
-//! guest (see ../orbstack/). Identification (`probe`, the TUI) works natively on macOS.
+//! `unlock`, `bootdiag`, and `flash-cdc` all work natively on both OSes: on Linux directly, and
+//! on macOS via [`macos_ktmac`] (an `IOHIDManager`-based companion, auto-detected) for `unlock`,
+//! and the bootloader's CDC‑ACM serial port (auto-selected over libusb) for `bootdiag` and
+//! `flash-cdc`. Only `handshake` still *claims the USB interface* directly via libusb with no
+//! serial alternative, which macOS refuses (`IOHIDFamily` owns it → `LIBUSB_ERROR_ACCESS`) — run
+//! it inside the OrbStack Linux guest on macOS (see `../orbstack/`). Everything else, including
+//! identification (`probe`, the TUI), works natively everywhere.
 
 use rusb::{Context, Direction, TransferType, UsbContext};
 use std::time::Duration;
@@ -821,8 +826,8 @@ USAGE:
   ktflash            live TUI dashboard (macOS-friendly, read-only)
   ktflash probe       one-shot device report
   ktflash fingerprint structured device fingerprint (JSON)   (no hardware write)
-  ktflash handshake   normal mode HID handshake        (OrbStack/Linux)
-  ktflash unlock      reboot into the CDC bootloader    (OrbStack/Linux)
+  ktflash handshake   normal mode HID handshake        (Linux native; macOS via OrbStack)
+  ktflash unlock      reboot into the CDC bootloader    (native on macOS + Linux)
   ktflash bootdiag [--transport auto|serial|usb] [--port <dev>] [--send]
                       probe the bootloader pipe; --send does a KTM liveness check
                       (advances the one-shot state machine — re-unlock before flashing)

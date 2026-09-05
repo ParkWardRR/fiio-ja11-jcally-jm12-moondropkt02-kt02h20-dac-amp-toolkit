@@ -25,13 +25,13 @@ behind Qt's threaded‑functor indirection (the chunked write loop), that is cal
   (`hid_read_timeout`, interrupt‑IN ep `0x83`). Not feature reports, not `DeviceIoControl`.
   The reference CLI (`ktflash`) uses **`rusb`/libusb** interrupt transfers (Linux/OrbStack —
   `rusb` on macOS still can't claim this interface). A **second, native macOS path** exists via
-  `IOHIDManager` (the `ktmac` companion tool, `staging/macos-native/ktmac`) — same wire bytes,
-  different API, no interface claim needed. Not yet merged into `ktflash` itself.
+  `IOHIDManager` (the `ktmac` companion tool, `macos/native/ktmac`) — same wire bytes, different
+  API, no interface claim needed. `ktflash unlock` auto-detects and shells out to it.
 - Commands live on the vendor HID collection at **usage page `0xFF01`**, report IDs
   `0x4B` and `0x54` — **not** the media-key collection (usage page `0x0C`).
 - **macOS caveat (corrected 2026‑09‑05):** this page previously claimed
   `IOHIDDeviceSetReport` couldn't reach the device natively on macOS. **That was wrong**,
-  confirmed by direct experiment (`staging/macos-native/ktmac`, E1 in
+  confirmed by direct experiment (`macos/native/ktmac`, E1 in
   [`MACOS-NATIVE.md`](MACOS-NATIVE.md) §4): `IOHIDDeviceSetReport(dev, kIOHIDReportTypeOutput,
   0x54, buf, 10)` via `IOHIDManager`, matching the `0xFF01` collection, works — the device
   re‑enumerates as `8888:cdc0` exactly as it does via Linux/OrbStack. The only prerequisite is
