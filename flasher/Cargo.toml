@@ -1,0 +1,28 @@
+[package]
+name = "ktflash"
+version = "1.1.1"
+edition = "2021"
+description = "Beautiful TUI + CLI to probe/unlock KTMicro KT02H20 USB-C DAC dongles (FiiO JA11 family) from macOS + OrbStack"
+license = "BlueOak-1.0.0"
+repository = "https://github.com/ParkWardRR/fiio-ja11-jcally-jm12-moondropkt02-kt02h20-dac-amp-toolkit"
+
+[features]
+vendored = ["rusb/vendored"]
+
+[dependencies]
+libc = "0.2"
+rusb = "0.9"
+ratatui = "0.29"
+crossterm = "0.28"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[[bin]]
+name = "ktflash"
+path = "src/main.rs"
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true

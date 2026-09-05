@@ -1,0 +1,89 @@
+# Fragments to MERGE into flasher/Cargo.toml. This file is not a valid standalone manifest.
+#
+# docs/RELEASE-PLAN.md §2 (vendored/static), §5.2 (packages).
+# STATUS: the `vendored` feature and `libc` dep were compile-verified; the package metadata
+# below was NOT — cargo-deb / cargo-generate-rpm were never run.
+
+# ---------------------------------------------------------------------------
+# 1. Static builds. `rusb`'s `vendored` feature compiles libusb from source.
+#
+# Why this yields a *static, dependency-free* binary: libusb1-sys 0.7.0's build.rs always
+# compiles linux_netlink.c + linux_usbfs.c on Linux, and only adds linux_udev.c if pkg-config
+# finds libudev. Build in an environment without libudev headers and libusb comes out udev-free,
+# enumerating via sysfs/usbfs. Combined with a musl target that gives one file that runs on
+# Alma 8/9/10, Debian 11/12/13, Ubuntu, Fedora and Arch alike.
+#
+# The default (no features) build still links system libusb, so the from-source developer
+# workflow in docs/LINUX.md is unchanged.
+# ---------------------------------------------------------------------------
+[features]
+vendored = ["rusb/vendored"]
+
+# ---------------------------------------------------------------------------
+# 2. Add to the EXISTING [dependencies] table (do not duplicate the table header).
+#
+# libc is already in Cargo.lock transitively via rusb/crossterm, and is MIT/Apache-2.0, so
+# promoting it to a direct dependency adds no new supply-chain surface and no new cargo-deny
+# question. It is what serialtransport.rs uses instead of pulling in the `serialport` crate.
+# ---------------------------------------------------------------------------
+[dependencies]
+libc = "0.2"
+
+# ---------------------------------------------------------------------------
+# 3. .deb packaging (cargo-deb). Debian 12/13, Ubuntu.
+#
+# No `depends` on libusb: the release binary is static. `assets` installs the udev rules to
+# /usr/lib/udev/rules.d — the step users forget, whose failure mode (LIBUSB_ERROR_ACCESS) looks
+# like a broken tool rather than a permissions problem.
+# ---------------------------------------------------------------------------
+[package.metadata.deb]
+maintainer = "ParkWardRR <noreply@github.com>"
+copyright = "Blue Oak Model License 1.0.0"
+license-file = ["../LICENSE.md", "0"]
+extended-description = """
+Identify and cross-flash the USB-C DAC/amp dongles built on the KTMicro KT02H20
+(FiiO JA11, JCALLY JM12, and clones).
+
+WARNING: flashing can brick your dongle, and ktflash cannot read firmware off a
+KT02H20 first — there is no backup path. Keep a known-good image before you start.
+"""
+section = "utils"
+priority = "optional"
+depends = ""
+assets = [
+    ["target/release/ktflash", "usr/bin/", "755"],
+    ["../packaging/99-ktflash.rules", "usr/lib/udev/rules.d/99-ktflash.rules", "644"],
+    ["../README.md", "usr/share/doc/ktflash/README.md", "644"],
+    ["../docs/FLASHING.md", "usr/share/doc/ktflash/FLASHING.md", "644"],
+    ["../docs/LINUX.md", "usr/share/doc/ktflash/LINUX.md", "644"],
+]
+# UNVERIFIED: cargo-deb's maintainer-script hooks vary by version. Confirm this key is
+# `maintainer-scripts` (a directory) in the installed version before relying on it.
+maintainer-scripts = "../packaging/deb/"
+
+# ---------------------------------------------------------------------------
+# 4. .rpm packaging (cargo-generate-rpm). AlmaLinux 9/10, RHEL, Rocky, Fedora.
+# ---------------------------------------------------------------------------
+[package.metadata.generate-rpm]
+license = "BlueOak-1.0.0"
+summary = "Probe and cross-flash KTMicro KT02H20 USB-C DAC dongles (FiiO JA11 family)"
+assets = [
+    { source = "target/release/ktflash", dest = "/usr/bin/ktflash", mode = "755" },
+    { source = "../packaging/99-ktflash.rules", dest = "/usr/lib/udev/rules.d/99-ktflash.rules", mode = "644" },
+    { source = "../README.md", dest = "/usr/share/doc/ktflash/README.md", mode = "644", doc = true },
+    { source = "../docs/FLASHING.md", dest = "/usr/share/doc/ktflash/FLASHING.md", mode = "644", doc = true },
+    { source = "../docs/LINUX.md", dest = "/usr/share/doc/ktflash/LINUX.md", mode = "644", doc = true },
+]
+# Static binary: nothing to require. Explicitly empty so rpmbuild's auto-requires (which would
+# pick up glibc from a non-musl build) cannot silently add a dependency the artifact does not need.
+requires = {}
+
+[package.metadata.generate-rpm.post_install_script]
+# Reload rules so the dongle works without a reboot; harmless if udev is absent.
+program = "/bin/sh"
+script = """
+if command -v udevadm >/dev/null 2>&1; then
+  udevadm control --reload-rules >/dev/null 2>&1 || :
+  udevadm trigger >/dev/null 2>&1 || :
+fi
+"""

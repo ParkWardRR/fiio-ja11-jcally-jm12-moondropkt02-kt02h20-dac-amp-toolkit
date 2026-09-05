@@ -1,0 +1,23 @@
+#!/bin/sh
+# cargo-deb maintainer script: reload udev so the dongle is usable without a reboot.
+# Deliberately never fails the install — a missing udevadm just means the user replugs later.
+set -e
+
+if [ "$1" = "configure" ]; then
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules >/dev/null 2>&1 || true
+        udevadm trigger >/dev/null 2>&1 || true
+    fi
+    cat <<'EOF'
+
+ktflash installed. udev rules are in /usr/lib/udev/rules.d/99-ktflash.rules —
+replug the dongle, then try:  ktflash probe
+
+WARNING: flashing can brick your dongle and there is NO firmware backup path on
+the KT02H20. Keep a known-good image before you flash. See
+/usr/share/doc/ktflash/FLASHING.md
+
+EOF
+fi
+
+exit 0

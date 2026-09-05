@@ -1,0 +1,16 @@
+{
+  "source": "synthetic (ReferenceCodec, NOT a real capture)",
+  "note": "Illustrates the transcript shape and exercises `bootdiag --replay`. Bytes use ktflash's ReferenceCodec, which is a stand-in for the real KTMicro wire framing (still to be reversed — roadmap M0/M1). Replace this with a real, decoded USBPcap capture once one exists.",
+  "device": "example JA11 8888:cdc0 (bootloader)",
+  "frames": [
+    { "direction": "out", "stage": "handshake", "timestamp_ms": 0,   "bytes_hex": "01" },
+    { "direction": "in",  "stage": "handshake", "timestamp_ms": 12,  "bytes_hex": "06" },
+    { "direction": "out", "stage": "erase",     "timestamp_ms": 30,  "bytes_hex": "020000000040000000", "decoded": { "command": "ERASE", "address": 0, "payload_length": 64 } },
+    { "direction": "in",  "stage": "erase",     "timestamp_ms": 210, "bytes_hex": "06" },
+    { "direction": "out", "stage": "program",   "timestamp_ms": 230, "bytes_hex": "03000000000400deadbeef", "decoded": { "command": "WRITE", "address": 0, "payload_length": 4 } },
+    { "direction": "in",  "stage": "program",   "timestamp_ms": 245, "bytes_hex": "06" },
+    { "direction": "out", "stage": "verify",    "timestamp_ms": 260, "bytes_hex": "04" },
+    { "direction": "in",  "stage": "verify",    "timestamp_ms": 480, "bytes_hex": "06" },
+    { "direction": "out", "stage": "reset",     "timestamp_ms": 500, "bytes_hex": "05" }
+  ]
+}

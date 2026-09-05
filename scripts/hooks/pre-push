@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Local CI gate: block a push if the checks fail. No GitHub Actions here.
+# Enable once per clone:  git config core.hooksPath scripts/hooks
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+exec "$root/flasher/ci.sh"

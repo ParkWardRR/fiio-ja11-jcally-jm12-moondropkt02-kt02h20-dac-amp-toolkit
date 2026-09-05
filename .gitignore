@@ -1,0 +1,22 @@
+# Rust
+/target
+flasher/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# OS
+.DS_Store
+
+# ktflash operation journals (per-flash, user-local; never commit)
+ktflash-*.journal.json
+
+# local RE artifacts / vendor blobs (never commit vendor firmware or the .exe)
+*.exe
+*.bin
+*.rzdb
+ghidra_proj/
+
+# staging/ build outputs (staging is scratch; its artifacts are never committed)
+staging/macos-native/ktmac/.build/
+staging/macos-native/e1_hid_setreport
+staging/macos-native/e3_interface_seize

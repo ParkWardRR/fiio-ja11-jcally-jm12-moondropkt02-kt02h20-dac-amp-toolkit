@@ -1,0 +1,29 @@
+# ktflash — udev rules for KTMicro KT02H20 / FiiO JA11 dongles and their bootloader.
+#
+# Without these, claiming the USB interface on Linux needs root. Installing them grants the
+# logged-in user access (via systemd-logind `uaccess`), so `ktflash unlock` / `bootdiag` /
+# `flash` work without sudo — the roadmap M3 "Linux-native" path, no OrbStack layer.
+#
+# Install:
+#   sudo cp packaging/99-ktflash.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# Then replug the dongle.
+#
+# `uaccess` is the modern approach (seat-local access). If your distro/setup doesn't honor it,
+# uncomment the GROUP/MODE lines and add yourself to the `plugdev` group instead.
+
+# Stock KTMicro KT02H20 (and other 0x31b2 dongles) — normal mode
+SUBSYSTEM=="usb", ATTR{idVendor}=="31b2", TAG+="uaccess"
+#SUBSYSTEM=="usb", ATTR{idVendor}=="31b2", GROUP="plugdev", MODE="0660"
+
+# FiiO / JadeAudio JA11 — already-flashed, normal mode
+SUBSYSTEM=="usb", ATTR{idVendor}=="2972", ATTR{idProduct}=="0102", TAG+="uaccess"
+#SUBSYSTEM=="usb", ATTR{idVendor}=="2972", ATTR{idProduct}=="0102", GROUP="plugdev", MODE="0660"
+
+# KT_USB_BOOT CDC bootloader (appears after `ktflash unlock`)
+SUBSYSTEM=="usb", ATTR{idVendor}=="8888", ATTR{idProduct}=="cdc0", TAG+="uaccess"
+#SUBSYSTEM=="usb", ATTR{idVendor}=="8888", ATTR{idProduct}=="cdc0", GROUP="plugdev", MODE="0660"
+
+# The bootloader also exposes a CDC-ACM tty (/dev/ttyACM*). ktflash drives the bulk endpoints
+# via libusb directly, so you don't need the tty — but if you use it, uaccess covers it too:
+SUBSYSTEM=="tty", ATTRS{idVendor}=="8888", ATTRS{idProduct}=="cdc0", TAG+="uaccess"

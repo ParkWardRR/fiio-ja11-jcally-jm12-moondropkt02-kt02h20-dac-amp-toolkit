@@ -1,0 +1,37 @@
+# cargo-deny — supply-chain gate for ktflash (roadmap Phase 4, release engineering).
+# A tool that erases real hardware should not pull in a yanked/vulnerable or oddly-licensed
+# crate silently. Run:  cargo deny check   (install: cargo install cargo-deny)
+# ktflash's local CI (flasher/ci.sh) runs this automatically *if* cargo-deny is installed.
+
+[advisories]
+version = 2
+yanked = "deny"
+# ignore = ["RUSTSEC-XXXX-XXXX"]  # only with a written justification
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses present in our dependency tree. Extend (with a glance at the crate)
+# rather than loosening the policy if `cargo deny check` reports a new one.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "BlueOak-1.0.0",
+    "CC0-1.0",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
